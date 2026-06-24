@@ -1,0 +1,28 @@
+/* Base button styling */
+.interactive-btn {
+    padding: 12px 24px;
+    font-size: 16px;
+    font-weight: bold;
+    color: #ffffff;
+    background-color: #007bff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease; /* Smooth visual feedback */
+}
+
+/* Hover interaction effect */
+.interactive-btn:hover {
+    background-color: #0056b3;
+    transform: translateY(-2px);
+}
+
+/* Active click interaction effect */
+.interactive-btn:active {
+    transform: translateY(0);
+}
+
+/* JavaScript toggled visual state */
+.interactive-btn.clicked {
+    background-color: #28a745;
+}
