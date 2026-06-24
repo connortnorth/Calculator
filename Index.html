@@ -2,9 +2,61 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Title</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Button</title>
+    <style>
+        /* Base button styling */
+        .interactive-btn {
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #ffffff;
+            background-color: #007bff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease; /* Smooth visual feedback */
+        }
+
+        /* Hover interaction effect */
+        .interactive-btn:hover {
+            background-color: #0056b3;
+            transform: translateY(-2px);
+        }
+
+        /* Active click interaction effect */
+        .interactive-btn:active {
+            transform: translateY(0);
+        }
+
+        /* JavaScript toggled visual state */
+        .interactive-btn.clicked {
+            background-color: #28a745;
+        }
+    </style>
 </head>
 <body>
-    <header>TEst For FuN BeCaUsE wHy NoT</header>
+
+<!-- HTML Structure -->
+<button id="actionBtn" class="interactive-btn" type="button">Click Me</button>
+
+<!-- JavaScript Interactivity -->
+<script>
+    // 1. Select the button element from the DOM
+    const button = document.getElementById('actionBtn');
+
+    // 2. Add an event listener to handle the click event
+    button.addEventListener('click', () => {
+        // Update button text dynamically
+        button.textContent = 'Success!';
+
+        // Toggle a CSS class for a visual state change
+        button.classList.add('clicked');
+
+        // Log interaction to the developer console
+        console.log('Button was successfully clicked!');
+    });
+</script>
+
 </body>
 </html>
