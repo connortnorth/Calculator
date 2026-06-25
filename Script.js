@@ -24,8 +24,8 @@ promptInput.addEventListener('keypress', function (e) {
 });
 
 function resizeCanvas() {
-    canvas.width = container.clientWidth;
-    canvas.height = container.clientHeight;
+    canvas.width = container.clientWidth || window.innerWidth;
+    canvas.height = container.clientHeight || window.innerHeight;
     if (offsetX === 0 && offsetY === 0) {
         offsetX = canvas.width / 2;
         offsetY = canvas.height / 2;
@@ -225,24 +225,60 @@ async function generateAiShape() {
 
     generateBtn.disabled = true;
     generateBtn.innerText = "Thinking...";
-    statusText.innerText = "Asking AI to calculate formulas...";
+    statusText.innerText = "Connecting to AI...";
     statusText.style.color = "#8e44ad";
 
     try {
-        const systemInstruction = `You are a mathematical graphing assistant. The user wants to draw: "${prompt}". 
-                You must return ONLY a raw JSON array of objects. 
-                Each object must have two properties: 'equation' (string) and 'color' (a strict 7-character hex code starting with #, like "#ff0000").
-                Use standard functional formats like "y = x^2" or implicit inequalities like "x^2 + y^2 <= 25".
-                Do not include markdown code blocks. Just the raw array of objects.`;
+        // --- Vercel / External Domain Auth Check ---
+        const signedIn = await puter.isSignedIn();
+        if (!signedIn) {
+            statusText.innerText = "Waiting for Puter sign-in...";
+            await puter.signIn();
+        }
+
+        statusText.innerText = "Asking AI to calculate formulas...";
+
+        // --- STRICTER SYSTEM PROMPT ---
+        const systemInstruction = `You are a strict JSON-only mathematical graphing API. The user wants to draw: "${prompt}". 
+                You MUST return ONLY a valid JSON array of objects. Do NOT use markdown formatting like \`\`\`json. Do NOT include any conversational text.
+                Format exactly like this:
+                [
+                  {"equation": "x^2 + y^2 <= 25", "color": "#ff0000"},
+                  {"equation": "y = x", "color": "#00ff00"}
+                ]
+                Use 7-character hex codes for color.`;
 
         const response = await puter.ai.chat([
             { role: "system", content: systemInstruction },
             { role: "user", content: prompt }
         ], { model: "google/gemini-3.5-flash" });
 
-        let aiText = response.message.content.replace(/```json/g, '').replace(/```/g, '').trim();
-        const newEquations = JSON.parse(aiText);
+        let aiText = response.message.content.trim();
 
+        // Debugging
+        console.log("Raw AI Response:", aiText);
+
+        // --- MULTI-LAYERED JSON CLEANUP ---
+        if (aiText.startsWith('```json')) aiText = aiText.replace(/```json/i, '');
+        if (aiText.startsWith('```')) aiText = aiText.replace(/```/g, '');
+        aiText = aiText.replace(/```/g, '').trim();
+
+        let jsonString = aiText;
+        const startIndex = aiText.indexOf('[');
+        const endIndex = aiText.lastIndexOf(']');
+
+        if (startIndex !== -1 && endIndex !== -1) {
+            jsonString = aiText.substring(startIndex, endIndex + 1);
+        }
+
+        // 3. Parse it
+        const newEquations = JSON.parse(jsonString);
+
+        if (!Array.isArray(newEquations)) {
+            throw new Error("Parsed JSON is not an array.");
+        }
+
+        // --- SUCCESS RENDER ---
         eqList.innerHTML = '';
         equations = [];
         newEquations.forEach(item => addEquation(item.equation, item.color));
@@ -256,7 +292,13 @@ async function generateAiShape() {
         if (window.innerWidth <= 768 && sidebar.classList.contains('open')) toggleSidebar();
 
     } catch (error) {
-        statusText.innerText = "AI Error: Could not generate shape. Try rephrasing.";
+        console.error("AI Parsing Error:", error);
+
+        if (error.message && error.message.toLowerCase().includes('sign in')) {
+            statusText.innerText = "Sign-in required to use AI here.";
+        } else {
+            statusText.innerText = "AI Error: Could not understand shape. Try rephrasing.";
+        }
         statusText.style.color = "#e74c3c";
     } finally {
         generateBtn.disabled = false; generateBtn.innerText = "Generate";
@@ -265,6 +307,8 @@ async function generateAiShape() {
 
 // --- RENDER LOOP WITH DYNAMIC AXES ---
 function draw() {
+    if (!canvas.width || !canvas.height) return;
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const minPixelsBetweenLines = 70;
@@ -430,29 +474,28 @@ function draw() {
     });
 }
 
-// --- INTERACTIVITY WITH MOBILE PINCH ZOOM & PREVENT NATIVE ZOOM ---
+// --- SAFER MOBILE TOUCH EVENTS ---
 let isDragging = false;
 let lastMouseX, lastMouseY;
 let lastPinchDist = null;
 
 function getPinchDistance(touches) {
-    return Math.hypot(
-        touches[0].clientX - touches[1].clientX,
-        touches[0].clientY - touches[1].clientY
-    );
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
 }
 
 canvas.addEventListener('mousedown', (e) => { isDragging = true; lastMouseX = e.clientX; lastMouseY = e.clientY; });
 
-// NEW: { passive: false } added to allow preventDefault() to block native behavior
 canvas.addEventListener('touchstart', (e) => {
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
+
     if (e.touches.length === 1) {
         isDragging = true; lastMouseX = e.touches[0].clientX; lastMouseY = e.touches[0].clientY;
     } else if (e.touches.length === 2) {
         lastPinchDist = getPinchDistance(e.touches);
     }
-}, { passive: false });
+});
 
 window.addEventListener('mouseup', () => { isDragging = false; });
 window.addEventListener('touchend', (e) => {
@@ -466,9 +509,9 @@ window.addEventListener('mousemove', (e) => {
     lastMouseX = e.clientX; lastMouseY = e.clientY; draw();
 });
 
-// NEW: { passive: false } added here too
 canvas.addEventListener('touchmove', (e) => {
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
+
     if (e.touches.length === 1 && isDragging) {
         offsetX += e.touches[0].clientX - lastMouseX; offsetY += e.touches[0].clientY - lastMouseY;
         lastMouseX = e.touches[0].clientX; lastMouseY = e.touches[0].clientY; draw();
@@ -490,14 +533,16 @@ canvas.addEventListener('touchmove', (e) => {
         lastPinchDist = newPinchDist;
         draw();
     }
-}, { passive: false });
+});
 
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault(); const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9; scale *= zoomFactor;
     const mouseX = e.clientX - canvas.getBoundingClientRect().left; const mouseY = e.clientY - canvas.getBoundingClientRect().top;
     offsetX = mouseX - (mouseX - offsetX) * zoomFactor; offsetY = mouseY - (mouseY - offsetY) * zoomFactor; draw();
-}, { passive: false });
+});
 
-resizeCanvas();
-addEquation('x^2 + y^2 <= 25', '#3498db');
-addEquation('y > x^2 - 4', '#e74c3c');
+window.onload = () => {
+    resizeCanvas();
+    addEquation('x^2 + y^2 <= 25', '#3498db');
+    addEquation('y > x^2 - 4', '#e74c3c');
+};
