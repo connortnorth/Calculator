@@ -267,11 +267,9 @@ async function generateAiShape() {
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // 1. Calculate dynamic step based on zoom scale
-    const minPixelsBetweenLines = 70; // Target visual spacing
+    const minPixelsBetweenLines = 70;
     const rawMathStep = minPixelsBetweenLines / scale;
 
-    // Find the nearest nice number (1, 2, or 5 multiplied by a power of 10)
     const magnitude = Math.pow(10, Math.floor(Math.log10(rawMathStep)));
     const residual = rawMathStep / magnitude;
     let stepMultiplier = 1;
@@ -282,11 +280,9 @@ function draw() {
     const mathStep = stepMultiplier * magnitude;
     const pixelStep = mathStep * scale;
 
-    // 2. Draw Grid & Numbers
     ctx.font = '12px "Courier New", Courier, monospace';
     ctx.fillStyle = '#7f8c8d';
 
-    // Vertical Grid Lines (X-Axis)
     ctx.lineWidth = 1; ctx.strokeStyle = '#e0e0e0'; ctx.beginPath();
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
 
@@ -295,16 +291,14 @@ function draw() {
         let px = offsetX + mathX * scale;
         ctx.moveTo(px, 0); ctx.lineTo(px, canvas.height);
 
-        // Draw numbers (skip 0)
         if (Math.abs(mathX) > 1e-10) {
             let textY = Math.max(5, Math.min(canvas.height - 20, offsetY + 5));
-            let label = parseFloat(mathX.toPrecision(12)).toString(); // fixes floating point math errors
+            let label = parseFloat(mathX.toPrecision(12)).toString();
             ctx.fillText(label, px, textY);
         }
     }
     ctx.stroke();
 
-    // Horizontal Grid Lines (Y-Axis)
     ctx.beginPath();
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
 
@@ -313,7 +307,6 @@ function draw() {
         let py = offsetY - mathY * scale;
         ctx.moveTo(0, py); ctx.lineTo(canvas.width, py);
 
-        // Draw numbers (skip 0)
         if (Math.abs(mathY) > 1e-10) {
             let textX = Math.max(25, Math.min(canvas.width - 5, offsetX - 5));
             let label = parseFloat(mathY.toPrecision(12)).toString();
@@ -322,19 +315,16 @@ function draw() {
     }
     ctx.stroke();
 
-    // 3. Draw Thick Axes
     ctx.lineWidth = 2; ctx.strokeStyle = '#2c3e50'; ctx.beginPath();
     if (offsetY >= 0 && offsetY <= canvas.height) { ctx.moveTo(0, offsetY); ctx.lineTo(canvas.width, offsetY); }
     if (offsetX >= 0 && offsetX <= canvas.width) { ctx.moveTo(offsetX, 0); ctx.lineTo(offsetX, canvas.height); }
     ctx.stroke();
 
-    // Draw Origin (0)
     ctx.textAlign = 'right'; ctx.textBaseline = 'top';
     let originX = Math.max(15, Math.min(canvas.width - 5, offsetX - 5));
     let originY = Math.max(5, Math.min(canvas.height - 15, offsetY + 5));
     ctx.fillText("0", originX, originY);
 
-    // 4. Draw Equations
     equations.forEach(eq => {
         if (eq.type !== 'graph') return;
         let rawExpr = eq.element.value.trim().replace(/\s+/g, '').toLowerCase();
@@ -440,7 +430,7 @@ function draw() {
     });
 }
 
-// --- INTERACTIVITY WITH MOBILE PINCH ZOOM ---
+// --- INTERACTIVITY WITH MOBILE PINCH ZOOM & PREVENT NATIVE ZOOM ---
 let isDragging = false;
 let lastMouseX, lastMouseY;
 let lastPinchDist = null;
@@ -453,13 +443,16 @@ function getPinchDistance(touches) {
 }
 
 canvas.addEventListener('mousedown', (e) => { isDragging = true; lastMouseX = e.clientX; lastMouseY = e.clientY; });
+
+// NEW: { passive: false } added to allow preventDefault() to block native behavior
 canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
     if (e.touches.length === 1) {
         isDragging = true; lastMouseX = e.touches[0].clientX; lastMouseY = e.touches[0].clientY;
     } else if (e.touches.length === 2) {
         lastPinchDist = getPinchDistance(e.touches);
     }
-});
+}, { passive: false });
 
 window.addEventListener('mouseup', () => { isDragging = false; });
 window.addEventListener('touchend', (e) => {
@@ -473,17 +466,17 @@ window.addEventListener('mousemove', (e) => {
     lastMouseX = e.clientX; lastMouseY = e.clientY; draw();
 });
 
+// NEW: { passive: false } added here too
 canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
     if (e.touches.length === 1 && isDragging) {
         offsetX += e.touches[0].clientX - lastMouseX; offsetY += e.touches[0].clientY - lastMouseY;
         lastMouseX = e.touches[0].clientX; lastMouseY = e.touches[0].clientY; draw();
     } else if (e.touches.length === 2 && lastPinchDist) {
-        // Pinch to zoom logic
         const newPinchDist = getPinchDistance(e.touches);
         const zoomFactor = newPinchDist / lastPinchDist;
         scale *= zoomFactor;
 
-        // Center the zoom on the pinch center
         const pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         const pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
 
@@ -497,13 +490,13 @@ canvas.addEventListener('touchmove', (e) => {
         lastPinchDist = newPinchDist;
         draw();
     }
-});
+}, { passive: false });
 
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault(); const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9; scale *= zoomFactor;
     const mouseX = e.clientX - canvas.getBoundingClientRect().left; const mouseY = e.clientY - canvas.getBoundingClientRect().top;
     offsetX = mouseX - (mouseX - offsetX) * zoomFactor; offsetY = mouseY - (mouseY - offsetY) * zoomFactor; draw();
-});
+}, { passive: false });
 
 resizeCanvas();
 addEquation('x^2 + y^2 <= 25', '#3498db');
