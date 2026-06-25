@@ -34,15 +34,12 @@ function resizeCanvas() {
 }
 window.addEventListener('resize', resizeCanvas);
 
-// --- NEW: Color Normalizer Firewall ---
 function normalizeColor(c) {
     if (!c) return null;
     let colorStr = c.trim();
-    // If the AI forgot the hash but gave 3 or 6 hex digits, add the hash
     if (/^[0-9A-Fa-f]{6}$/.test(colorStr) || /^[0-9A-Fa-f]{3}$/.test(colorStr)) {
         colorStr = '#' + colorStr;
     }
-    // Ask the browser's hidden canvas to translate ANY valid CSS color (like "red" or "#f00") into strict "#rrggbb"
     const tempCtx = document.createElement('canvas').getContext('2d');
     tempCtx.fillStyle = colorStr;
     return tempCtx.fillStyle;
@@ -50,8 +47,6 @@ function normalizeColor(c) {
 
 function addEquation(initialMath = '', specificColor = null) {
     const id = Date.now() + Math.random();
-
-    // Pass the incoming color through our firewall
     let color = specificColor ? normalizeColor(specificColor) : defaultColors[equations.length % defaultColors.length];
 
     const row = document.createElement('div');
@@ -62,7 +57,7 @@ function addEquation(initialMath = '', specificColor = null) {
                     <input type="color" class="color-picker" id="color-${id}" value="${color}">
                 </div>
                 <div class="math-input-container">
-                    <input type="text" class="math-input" placeholder="e.g. y > x^2, x^2+y^2 <= 25" value="${initialMath}">
+                    <input type="text" class="math-input" placeholder="e.g. x^2+y^2 <= 10 {x > 0}" value="${initialMath}">
                     <span class="eval-result" id="eval-${id}"></span>
                 </div>
                 <button class="delete-btn" onclick="deleteEquation(${id})" title="Delete equation">✕</button>
@@ -99,13 +94,15 @@ function deleteEquation(id) {
 
 function handleRowEvaluation(id, text) {
     const cleanText = text.replace(/\s+/g, '').toLowerCase();
-    const resultSpan = document.getElementById(`eval-${id}`);
+    const resultSpan = document.getElementById('eval-' + id);
     const eqIndex = equations.findIndex(eq => eq.id === id);
-    if (eqIndex === -1) return;
+    if (eqIndex === -1 || !resultSpan) return;
 
-    if (!cleanText.includes('x') && !cleanText.includes('y') && cleanText.length > 0) {
+    const cleanMathOnly = cleanText.replace(/\{[^}]+\}/g, '');
+
+    if (!cleanMathOnly.includes('x') && !cleanMathOnly.includes('y') && cleanMathOnly.length > 0) {
         try {
-            const parsedExpr = parseMathText(cleanText);
+            const parsedExpr = parseMathText(cleanMathOnly);
             const evalFunc = new Function('return ' + parsedExpr);
             const val = evalFunc();
             if (typeof val === 'number' && !isNaN(val)) {
@@ -174,8 +171,16 @@ function textToLatex(text) {
 
     latex = latex.replace(/>=/g, '\\ge ').replace(/<=/g, '\\le ');
     latex = latex.replace(/\*/g, '\\cdot ');
+    latex = latex.replace(/\{/g, '\\left\\{').replace(/\}/g, '\\right\\}');
 
     return latex;
+}
+
+function getRGB(hex) {
+    let rgb = [0, 0, 0];
+    let hexMatch = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    if (hexMatch) rgb = [parseInt(hexMatch[1], 16), parseInt(hexMatch[2], 16), parseInt(hexMatch[3], 16)];
+    return rgb;
 }
 
 // --- EXPORT TO ACTUAL DESMOS ---
@@ -196,7 +201,7 @@ function exportToDesmos() {
     }
 
     if (sidebar.classList.contains('open')) toggleSidebar();
-    document.getElementById('desmos-wrapper').style.display = 'block';
+    document.getElementById('desmos-wrapper').style.zindex = 'block';
 
     if (!isDesmosScriptLoaded) {
         const script = document.createElement('script');
@@ -225,7 +230,7 @@ function initActualDesmos(eqs) {
 
 function closeActualDesmos() { document.getElementById('desmos-wrapper').style.display = 'none'; }
 
-// --- AI GENERATION ---
+// --- FIXED AND ENHANCED AI GENERATION ---
 async function generateAiShape() {
     const prompt = promptInput.value.trim();
     if (!prompt) return;
@@ -236,19 +241,36 @@ async function generateAiShape() {
     statusText.style.color = "#8e44ad";
 
     try {
-        // Upgraded prompt to strictly force a 7-character hex string
         const systemInstruction = `You are a mathematical graphing assistant. The user wants to draw: "${prompt}".
-                You must return ONLY a raw JSON array of objects.
-                Each object must have two properties: 'equation' (string) and 'color' (a strict 7-character hex code starting with #, like "#ff0000").
-                Use standard functional formats like "y = x^2" or implicit inequalities like "x^2 + y^2 <= 25".
-                Do not include markdown code blocks. Just the raw array of objects.`;
+                CRITICAL RULE: You must return ONLY a raw valid JSON array of objects. Do not include markdown blocks or text conversation.
+                Each object must have exactly two properties: 'equation' (string) and 'color' (a strict 7-character hex code starting with #).
 
+                You must actively leverage general graphing capabilities when requested:
+                1. Explicit curves: "y = x^2", "x = sin(y)"
+                2. Implicit shapes/Circles/Conics: "x^2 + y^2 = 9"
+                3. Shaded Regions / Inequalities: Use strict symbols like "x^2 + y^2 < 10", "y >= x^2", or "y < sin(x)".
+                4. Domain Boundaries: Add conditional clipping bounds at the end using brackets like "y = x^2 {x < 2}" or "x^2 + y^2 <= 16 {x > 0}".
+                If multiple conditions apply, chain brackets: "{x > 0}{y < 3}". Do not join expressions inside a single bracket like "{0 < x < 5}".
+
+                Example output format:
+                [{"equation": "x^2 + y^2 < 10", "color": "#2d70b3"}, {"equation": "y = x^2 {x < 2}", "color": "#c74440"}]`;
+
+        // REMOVED explicit model parameter to let Puter auto-route to active API nodes
         const response = await puter.ai.chat([
             { role: "system", content: systemInstruction },
             { role: "user", content: prompt }
-        ], { model: "google/gemini-3.5-flash" });
+        ]);
 
-        let aiText = response.message.content.replace(/```json/g, '').replace(/```/g, '').trim();
+        let aiText = response.message.content;
+
+        // Robust RegEx Shield extraction to isolate only the JSON array block [...]
+        const arrayMatch = aiText.match(/\[\s*\{[\s\S]*\}\s*\]/);
+        if (arrayMatch) {
+            aiText = arrayMatch[0];
+        } else {
+            aiText = aiText.replace(/```json/g, '').replace(/```/g, '').trim();
+        }
+
         const newEquations = JSON.parse(aiText);
 
         eqList.innerHTML = '';
@@ -264,18 +286,20 @@ async function generateAiShape() {
         if (window.innerWidth <= 768 && sidebar.classList.contains('open')) toggleSidebar();
 
     } catch (error) {
-        statusText.innerText = "AI Error: Could not generate shape. Try rephrasing.";
+        console.error(error);
+        // EXPOSE the exact issue inside the browser interface for easier debugging
+        statusText.innerText = `AI Error: ${error.message || 'Check if a pop-up window was blocked.'}`;
         statusText.style.color = "#e74c3c";
     } finally {
         generateBtn.disabled = false; generateBtn.innerText = "Generate";
     }
 }
 
-// --- RENDER LOOP ---
+// --- GENERAL MATRIX RENDERING ENGINE ---
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw Grid & Axes
+    // Draw Grid Lines
     ctx.lineWidth = 1; ctx.strokeStyle = '#e0e0e0'; ctx.beginPath();
     let startX = (offsetX % scale) - scale;
     for (let x = startX; x < canvas.width; x += scale) { ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); }
@@ -283,6 +307,7 @@ function draw() {
     for (let y = startY; y < canvas.height; y += scale) { ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); }
     ctx.stroke();
 
+    // Draw Core Axes
     ctx.lineWidth = 2; ctx.strokeStyle = '#000000'; ctx.beginPath();
     if (offsetY >= 0 && offsetY <= canvas.height) { ctx.moveTo(0, offsetY); ctx.lineTo(canvas.width, offsetY); }
     if (offsetX >= 0 && offsetX <= canvas.width) { ctx.moveTo(offsetX, 0); ctx.lineTo(offsetX, canvas.height); }
@@ -294,26 +319,45 @@ function draw() {
         let rawExpr = eq.element.value.trim().replace(/\s+/g, '').toLowerCase();
         if (!rawExpr) return;
 
-        let operatorMatch = rawExpr.match(/(>=|<=|>|<|=)/);
+        let coreExpr = rawExpr;
+        let boundaryStrings = [];
+        coreExpr = coreExpr.replace(/\{([^}]+)\}/g, (match, condition) => {
+            boundaryStrings.push(condition);
+            return '';
+        });
+
+        let parsedBoundaries = boundaryStrings.map(b => {
+            let pb = parseMathText(b);
+            return pb.replace(/(?<![<>])=(?!=)/g, '===');
+        });
+
+        let checkBoundaries;
+        try {
+            let jointCondition = parsedBoundaries.length > 0 ? parsedBoundaries.join(')&&(') : 'true';
+            checkBoundaries = new Function('x', 'y', 'return (' + jointCondition + ')');
+            checkBoundaries(0, 0);
+        } catch (e) { return; }
+
+        let operatorMatch = coreExpr.match(/(>=|<=|>|<|=)/);
         let operator, lhs, rhs;
 
         if (operatorMatch) {
             operator = operatorMatch[0];
-            let parts = rawExpr.split(operator);
+            let parts = coreExpr.split(operator);
             lhs = parts[0].trim();
             rhs = parts[1].trim();
         } else {
-            operator = '=';
-            lhs = 'y';
-            rhs = rawExpr;
+            operator = '='; lhs = 'y'; rhs = coreExpr;
         }
 
         let isInequality = operator !== '=';
-        let isExplicitY = lhs === 'y';
-        let isExplicitX = lhs === 'x';
+        let isExplicitY = (lhs === 'y' && !rhs.includes('y'));
+        let isExplicitX = (lhs === 'x' && !rhs.includes('x'));
+        let isImplicit = !isExplicitY && !isExplicitX;
 
+        // CASE A: INEQUALITY REGION SHADING
         if (isInequality) {
-            let parsedExpr = parseMathText(rawExpr);
+            let parsedExpr = parseMathText(coreExpr);
             let fShader;
             try {
                 fShader = new Function('x', 'y', 'return ' + parsedExpr);
@@ -325,23 +369,20 @@ function draw() {
             let offH = Math.ceil(canvas.height * res);
 
             let offCanvas = document.createElement('canvas');
-            offCanvas.width = offW;
-            offCanvas.height = offH;
+            offCanvas.width = offW; offCanvas.height = offH;
             let offCtx = offCanvas.getContext('2d');
             let imgData = offCtx.createImageData(offW, offH);
             let data = imgData.data;
 
-            let rgb = [0,0,0];
-            let hexMatch = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(eq.color);
-            if (hexMatch) rgb = [parseInt(hexMatch[1], 16), parseInt(hexMatch[2], 16), parseInt(hexMatch[3], 16)];
-
+            let rgb = getRGB(eq.color);
             let index = 0;
+
             for (let py = 0; py < offH; py++) {
                 let mathY = (offsetY - (py / res)) / scale;
                 for (let px = 0; px < offW; px++) {
                     let mathX = ((px / res) - offsetX) / scale;
                     try {
-                        if (fShader(mathX, mathY)) {
+                        if (checkBoundaries(mathX, mathY) && fShader(mathX, mathY)) {
                             data[index] = rgb[0];
                             data[index+1] = rgb[1];
                             data[index+2] = rgb[2];
@@ -355,7 +396,66 @@ function draw() {
             ctx.drawImage(offCanvas, 0, 0, offW, offH, 0, 0, canvas.width, canvas.height);
         }
 
-        if (isExplicitY || isExplicitX) {
+        // CASE B: IMPLICIT EQUATION BOUNDARIES
+        if (!isInequality && isImplicit) {
+            let fValue;
+            try {
+                fValue = new Function('x', 'y', 'return (' + parseMathText(lhs) + ') - (' + parseMathText(rhs) + ')');
+                fValue(0,0);
+            } catch(e) { return; }
+
+            let res = 1.0;
+            let offW = Math.ceil(canvas.width * res);
+            let offH = Math.ceil(canvas.height * res);
+
+            let offCanvas = document.createElement('canvas');
+            offCanvas.width = offW; offCanvas.height = offH;
+            let offCtx = offCanvas.getContext('2d');
+            let imgData = offCtx.createImageData(offW, offH);
+            let data = imgData.data;
+
+            let rgb = getRGB(eq.color);
+
+            let grid = [];
+            for (let py = 0; py < offH; py++) {
+                grid[py] = new Float32Array(offW);
+                let mathY = (offsetY - (py / res)) / scale;
+                for (let px = 0; px < offW; px++) {
+                    let mathX = ((px / res) - offsetX) / scale;
+                    if (checkBoundaries(mathX, mathY)) {
+                        grid[py][px] = fValue(mathX, mathY);
+                    } else {
+                        grid[py][px] = NaN;
+                    }
+                }
+            }
+
+            for (let py = 0; py < offH - 1; py++) {
+                for (let px = 0; px < offW - 1; px++) {
+                    let v = grid[py][px];
+                    if (isNaN(v)) continue;
+                    let r = grid[py][px+1];
+                    let b = grid[py+1][px];
+
+                    let isZeroCrossing = false;
+                    if (!isNaN(r) && v * r <= 0) isZeroCrossing = true;
+                    if (!isNaN(b) && v * b <= 0) isZeroCrossing = true;
+
+                    if (isZeroCrossing) {
+                        let index = (py * offW + px) * 4;
+                        data[index] = rgb[0];
+                        data[index+1] = rgb[1];
+                        data[index+2] = rgb[2];
+                        data[index+3] = 255;
+                    }
+                }
+            }
+            offCtx.putImageData(imgData, 0, 0);
+            ctx.drawImage(offCanvas, 0, 0, offW, offH, 0, 0, canvas.width, canvas.height);
+        }
+
+        // CASE C: EXPLICIT LOGIC BOUNDARIES
+        if (!isInequality && !isImplicit) {
             let parsedBoundary = parseMathText(rhs);
             let fLine;
             let independentVar = isExplicitY ? 'x' : 'y';
@@ -367,12 +467,7 @@ function draw() {
             ctx.beginPath();
             ctx.strokeStyle = eq.color;
             ctx.lineWidth = 2.5;
-
-            if (operator === '<' || operator === '>') {
-                ctx.setLineDash([5, 5]);
-            } else {
-                ctx.setLineDash([]);
-            }
+            ctx.setLineDash([]);
 
             let firstPoint = true;
 
@@ -381,8 +476,10 @@ function draw() {
                     let mathX = (px - offsetX) / scale;
                     try {
                         let mathY = fLine(mathX); let py = offsetY - (mathY * scale);
-                        if (isFinite(py)) {
-                            if (firstPoint) { ctx.moveTo(px, py); firstPoint = false; } else { ctx.lineTo(px, py); }
+
+                        if (isFinite(py) && checkBoundaries(mathX, mathY)) {
+                            if (firstPoint) { ctx.moveTo(px, py); firstPoint = false; }
+                            else { ctx.lineTo(px, py); }
                         } else { firstPoint = true; }
                     } catch (e) { firstPoint = true; }
                 }
@@ -391,19 +488,20 @@ function draw() {
                     let mathY = (offsetY - py) / scale;
                     try {
                         let mathX = fLine(mathY); let px = offsetX + (mathX * scale);
-                        if (isFinite(px)) {
-                            if (firstPoint) { ctx.moveTo(px, py); firstPoint = false; } else { ctx.lineTo(px, py); }
+
+                        if (isFinite(px) && checkBoundaries(mathX, mathY)) {
+                            if (firstPoint) { ctx.moveTo(px, py); firstPoint = false; }
+                            else { ctx.lineTo(px, py); }
                         } else { firstPoint = true; }
                     } catch (e) { firstPoint = true; }
                 }
             }
             ctx.stroke();
-            ctx.setLineDash([]);
         }
     });
 }
 
-// --- INTERACTIVITY ---
+// --- INTERACTIVITY LOGIC ---
 let isDragging = false; let lastMouseX, lastMouseY;
 canvas.addEventListener('mousedown', (e) => { isDragging = true; lastMouseX = e.clientX; lastMouseY = e.clientY; });
 canvas.addEventListener('touchstart', (e) => {
@@ -428,5 +526,5 @@ canvas.addEventListener('wheel', (e) => {
 });
 
 resizeCanvas();
-addEquation('x^2 + y^2 <= 25', '#3498db');
-addEquation('y > x^2 - 4', '#e74c3c');
+addEquation('x^2 + y^2 < 10', '#2d70b3');
+addEquation('y = x^2 {x < 2}', '#c74440');
