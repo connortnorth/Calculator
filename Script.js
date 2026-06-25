@@ -13,7 +13,6 @@ let scale = 50;
 let offsetX = 0;
 let offsetY = 0;
 
-// --- Event Listener for the Enter Key ---
 promptInput.addEventListener('keypress', function (e) {
     if (e.key === 'Enter') {
         e.preventDefault();
@@ -33,32 +32,76 @@ function resizeCanvas() {
 window.addEventListener('resize', resizeCanvas);
 
 function addEquation(initialMath = '') {
-    const id = Date.now();
+    const id = Date.now() + Math.random();
     const color = colors[equations.length % colors.length];
 
     const row = document.createElement('div');
     row.className = 'equation-row';
+    row.id = `row-${id}`;
     row.innerHTML = `
                 <div class="color-dot" style="background-color: ${color};"></div>
-                <input type="text" class="math-input" placeholder="e.g. x^2 or sin(x)" value="${initialMath}">
+                <div class="math-input-container">
+                    <input type="text" class="math-input" placeholder="e.g. y = x^2, x = y^2, or 5*5" value="${initialMath}">
+                    <span class="eval-result" id="eval-${id}"></span>
+                </div>
+                <button class="delete-btn" onclick="deleteEquation(${id})" title="Delete equation">✕</button>
             `;
 
     const input = row.querySelector('.math-input');
-    input.addEventListener('input', draw);
+    input.addEventListener('input', () => {
+        handleRowEvaluation(id, input.value);
+        draw();
+    });
 
     eqList.appendChild(row);
-    equations.push({ id, element: input, color });
+    equations.push({ id, element: input, color, type: 'graph' });
 
+    handleRowEvaluation(id, initialMath);
     input.focus();
     draw();
 }
 
-// Math Parser
+function deleteEquation(id) {
+    equations = equations.filter(eq => eq.id !== id);
+    const row = document.getElementById(`row-${id}`);
+    if (row) row.remove();
+    draw();
+}
+
+// Evaluates if the row is a pure numerical expression or a graphable item
+function handleRowEvaluation(id, text) {
+    const cleanText = text.replace(/\s+/g, '').toLowerCase();
+    const resultSpan = document.getElementById(`eval-${id}`);
+    const eqIndex = equations.findIndex(eq => eq.id === id);
+
+    if (eqIndex === -1) return;
+
+    // If it contains no functional variables, it's a pure numerical expression
+    if (!cleanText.includes('x') && !cleanText.includes('y') && cleanText.length > 0) {
+        try {
+            const parsedExpr = parseMathText(cleanText);
+            const evalFunc = new Function('return ' + parsedExpr);
+            const val = evalFunc();
+            if (typeof val === 'number' && !isNaN(val)) {
+                // Round nicely to 4 decimal places max
+                resultSpan.innerText = `= ${Math.round(val * 10000) / 10000}`;
+                equations[eqIndex].type = 'eval'; // Tag it so renderer ignores drawing a line
+                return;
+            }
+        } catch(e) {}
+    }
+
+    // Default back to treating it as a graphable item
+    resultSpan.innerText = '';
+    equations[eqIndex].type = 'graph';
+}
+
+// Math Translation Parser
 function parseMathText(expr) {
     let parsed = expr.toLowerCase()
         .replace(/\s+/g, '')
-        .replace(/(\d)([xX\(a-zA-Z])/g, '$1*$2')
-        .replace(/([xX\)])(\d)/g, '$1*$2')
+        .replace(/(\d)([xXyY\(a-zA-Z])/g, '$1*$2')
+        .replace(/([xXyY\)])(\d)/g, '$1*$2')
         .replace(/\^/g, '**')
         .replace(/pi|π/g, 'Math.PI')
         .replace(/\be\b/g, 'Math.E')
@@ -80,7 +123,6 @@ async function generateAiShape() {
     const prompt = promptInput.value.trim();
     if (!prompt) return;
 
-    // UI Loading State
     generateBtn.disabled = true;
     generateBtn.innerText = "Thinking...";
     statusText.innerText = "Asking AI to calculate formulas...";
@@ -88,33 +130,27 @@ async function generateAiShape() {
 
     try {
         const systemInstruction = `You are a mathematical graphing assistant. The user wants to draw: "${prompt}". 
-                You must return ONLY a raw JSON array of strings containing mathematical formulas in terms of x. 
-                Do not include y=. Do not include markdown code blocks. Just the array.
+                You must return ONLY a raw JSON array of strings containing mathematical formulas.
+                You are allowed to use standard functional formats like "x^2", "y = sin(x)", or "x = y^2" depending on the shape orientation.
+                Do not include markdown code blocks. Just the raw array.
                 Only use standard arithmetic and these functions: sin, cos, tan, sqrt, abs, acos, asin, atan, log, ln, e, pi. 
-                Use x as the variable. Example output: ["sqrt(25-x^2)", "-sqrt(25-x^2)"]`;
+                Example output format: ["y = sqrt(25-x^2)", "y = -sqrt(25-x^2)"] or ["x = y^2"]`;
 
-        // Call the Puter.js AI SDK (using Gemini Flash)
         const response = await puter.ai.chat([
             { role: "system", content: systemInstruction },
             { role: "user", content: prompt }
         ], { model: "google/gemini-3.5-flash" });
 
-        // Extract the content from the response
         let aiText = response.message.content;
-
-        // Clean up any markdown formatting the AI might sneak in
         aiText = aiText.replace(/```json/g, '').replace(/```/g, '').trim();
 
         const newEquations = JSON.parse(aiText);
 
-        // Clear current UI
         eqList.innerHTML = '';
         equations = [];
 
-        // Add the new equations generated by the AI
         newEquations.forEach(eq => addEquation(eq));
 
-        // Reset viewport
         scale = 50;
         offsetX = canvas.width / 2;
         offsetY = canvas.height / 2;
@@ -128,7 +164,6 @@ async function generateAiShape() {
         statusText.innerText = "AI Error: Could not generate shape. Try rephrasing.";
         statusText.style.color = "#e74c3c";
     } finally {
-        // Reset UI
         generateBtn.disabled = false;
         generateBtn.innerText = "Generate";
     }
@@ -154,14 +189,32 @@ function draw() {
 
     // Equations
     equations.forEach(eq => {
-        const expr = eq.element.value;
-        if (!expr || !expr.includes('x')) return;
+        if (eq.type !== 'graph') return; // Skip purely numerical expressions
 
-        const parsedExpr = parseMathText(expr);
+        let rawExpr = eq.element.value.trim().replace(/\s+/g, '').toLowerCase();
+        if (!rawExpr) return;
+
+        let mode = 'y_of_x'; // Default standard plotting orientation
+        let mathFormula = rawExpr;
+
+        // Detect custom structures like y = ... or x = ...
+        if (rawExpr.startsWith('y=')) {
+            mathFormula = rawExpr.substring(2);
+        } else if (rawExpr.startsWith('x=')) {
+            mode = 'x_of_y';
+            mathFormula = rawExpr.substring(2);
+        } else if (rawExpr.includes('=')) {
+            // Fallback configuration if they write an illegal expression format
+            return;
+        }
+
+        const parsedExpr = parseMathText(mathFormula);
 
         let f;
         try {
-            f = new Function('x', 'return ' + parsedExpr);
+            // Bind the independent variable dynamically based on layout mode
+            const independentVar = (mode === 'x_of_y') ? 'y' : 'x';
+            f = new Function(independentVar, 'return ' + parsedExpr);
             f(0);
         } catch (e) { return; }
 
@@ -171,31 +224,40 @@ function draw() {
 
         let firstPoint = true;
 
-        for (let px = 0; px <= canvas.width; px++) {
-            let mathX = (px - offsetX) / scale;
-            try {
-                let mathY = f(mathX);
-                let py = offsetY - (mathY * scale);
+        if (mode === 'y_of_x') {
+            // Standard Horizontal Evaluation Loop
+            for (let px = 0; px <= canvas.width; px++) {
+                let mathX = (px - offsetX) / scale;
+                try {
+                    let mathY = f(mathX);
+                    let py = offsetY - (mathY * scale);
 
-                if (isFinite(py)) {
-                    if (firstPoint) {
-                        ctx.moveTo(px, py);
-                        firstPoint = false;
-                    } else {
-                        ctx.lineTo(px, py);
-                    }
-                } else {
-                    firstPoint = true;
-                }
-            } catch (e) {
-                firstPoint = true;
+                    if (isFinite(py)) {
+                        if (firstPoint) { ctx.moveTo(px, py); firstPoint = false; }
+                        else { ctx.lineTo(px, py); }
+                    } else { firstPoint = true; }
+                } catch (e) { firstPoint = true; }
+            }
+        } else if (mode === 'x_of_y') {
+            // Inverse Vertical Evaluation Loop for x = f(y) equations
+            for (let py = 0; py <= canvas.height; py++) {
+                let mathY = (offsetY - py) / scale;
+                try {
+                    let mathX = f(mathY);
+                    let px = offsetX + (mathX * scale);
+
+                    if (isFinite(px)) {
+                        if (firstPoint) { ctx.moveTo(px, py); firstPoint = false; }
+                        else { ctx.lineTo(px, py); }
+                    } else { firstPoint = true; }
+                } catch (e) { firstPoint = true; }
             }
         }
         ctx.stroke();
     });
 }
 
-// Pan and Zoom
+// Pan and Zoom Interactivity
 let isDragging = false;
 let lastMouseX, lastMouseY;
 
@@ -220,4 +282,5 @@ canvas.addEventListener('wheel', (e) => {
 });
 
 resizeCanvas();
-addEquation('x^2');
+addEquation('y = x^2');
+addEquation('5 * sin(pi / 2)');
