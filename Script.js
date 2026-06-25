@@ -1,6 +1,15 @@
 const display = document.getElementById('display');
-let currentInput = '0';
+const clearBtn = document.getElementById('clear-btn');
 let shouldResetScreen = false;
+
+// Updates the Clear button text dynamically
+function updateClearButton() {
+    if (display.value === '0' || display.value === 'Error') {
+        clearBtn.innerText = 'C';
+    } else {
+        clearBtn.innerText = 'AC';
+    }
+}
 
 // Adds a number or decimal to the display
 function appendNumber(number) {
@@ -8,39 +17,62 @@ function appendNumber(number) {
         display.value = '';
         shouldResetScreen = false;
     }
-    // Prevent multiple decimals
     if (number === '.' && display.value.includes('.')) return;
 
     display.value += number;
+    updateClearButton();
 }
 
 // Adds an operator to the display
 function appendOperator(operator) {
-    // Prevent adding multiple operators in a row
     const lastChar = display.value.slice(-1);
-    if (['+', '-', '*', '/'].includes(lastChar)) {
+    // Prevent stacking operators
+    if (['+', '-', '*', '/', '*'].includes(lastChar)) {
         display.value = display.value.slice(0, -1) + operator;
         return;
     }
     display.value += operator;
     shouldResetScreen = false;
+    updateClearButton();
+}
+
+// Handles advanced scientific functions immediately
+function calcSci(func) {
+    // Evaluate current expression first if needed
+    let val;
+    try {
+        val = eval(display.value);
+    } catch (e) {
+        val = parseFloat(display.value);
+    }
+
+    if (isNaN(val)) return;
+
+    switch(func) {
+        case 'sin': display.value = Math.sin(val); break; // Note: calculates in radians
+        case 'cos': display.value = Math.cos(val); break;
+        case 'tan': display.value = Math.tan(val); break;
+        case 'sqrt': display.value = Math.sqrt(val); break;
+        case 'log': display.value = Math.log10(val); break;
+    }
+    shouldResetScreen = true;
+    updateClearButton();
 }
 
 // Clears the calculator screen
 function clearDisplay() {
     display.value = '0';
+    updateClearButton();
 }
 
 // Calculates the mathematical result
 function calculateResult() {
     try {
-        // Warning: eval() is used here for simplicity in a standalone calculator.
-        // In a complex, production web app where users can type raw text,
-        // it's safer to use a dedicated math parser to prevent code injection.
         display.value = eval(display.value);
         shouldResetScreen = true;
     } catch (error) {
         display.value = 'Error';
         shouldResetScreen = true;
     }
+    updateClearButton();
 }

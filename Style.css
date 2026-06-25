@@ -1,4 +1,4 @@
-/* Base styling for the page */
+/* Base styling */
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     display: flex;
@@ -9,16 +9,16 @@ body {
     margin: 0;
 }
 
-/* Calculator container styling */
+/* Calculator container - made slightly wider for new buttons */
 .calculator {
     background-color: #2c3e50;
     padding: 20px;
     border-radius: 20px;
     box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
-    width: 320px;
+    width: 380px;
 }
 
-/* Display screen styling */
+/* Display screen */
 .display {
     width: 100%;
     height: 70px;
@@ -38,15 +38,15 @@ body {
 .buttons {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
+    gap: 10px;
 }
 
 /* Standard button styling */
 button {
-    padding: 20px;
-    font-size: 1.5rem;
+    padding: 18px;
+    font-size: 1.2rem;
     border: none;
-    border-radius: 12px;
+    border-radius: 10px;
     cursor: pointer;
     background-color: #34495e;
     color: white;
@@ -61,27 +61,44 @@ button:hover {
     background-color: #465c71;
 }
 
-/* Specific button colors */
+/* Specific button colors & layouts */
 .operator {
     background-color: #e67e22;
+    font-size: 1.5rem;
 }
 
 .operator:hover {
     background-color: #f39c12;
 }
 
+.sci {
+    background-color: #7f8c8d;
+    font-size: 1.1rem;
+}
+
+.sci:hover {
+    background-color: #95a5a6;
+}
+
 .clear {
     background-color: #e74c3c;
-    grid-column: span 2;
+    font-weight: bold;
 }
 
 .clear:hover {
     background-color: #c0392b;
 }
 
+/* The classic wide zero key */
+.zero-key {
+    grid-column: span 2;
+}
+
+/* Full width equals key */
 .equals {
     background-color: #27ae60;
-    grid-column: span 2;
+    grid-column: span 4;
+    font-size: 1.5rem;
 }
 
 .equals:hover {
