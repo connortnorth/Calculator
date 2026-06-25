@@ -3,21 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Desmos-Lite Graphing Engine</title>
+    <title>Desmos-Lite x Puter.js AI</title>
+    <script src="https://js.puter.com/v2/"></script>
     <link rel="stylesheet" href="Style.css">
 </head>
 <body>
 
 <div class="sidebar">
-    <div class="sidebar-header">Desmos-Lite</div>
+    <div class="sidebar-header">Desmos-Lite x Puter.js AI</div>
 
     <div class="ai-prompt-section">
         <div class="ai-input-wrapper">
-            <input type="text" id="ai-prompt" class="ai-input" placeholder="Ask AI: 'Draw a circle'">
-            <button class="ai-btn" onclick="generateAiShape()">Generate</button>
+            <input type="text" id="ai-prompt" class="ai-input" placeholder="Ask AI: 'Draw a cat face'">
+            <button id="generate-btn" class="ai-btn" onclick="generateAiShape()">Generate</button>
         </div>
-        <div style="font-size: 0.8rem; color: #7f8c8d;">
-            Try: "Draw a heart", "Draw a star", "Draw a spiral"
+        <div id="ai-status" style="font-size: 0.8rem; color: #7f8c8d;">
+            Powered by Puter.js (No API key required)
         </div>
     </div>
 
