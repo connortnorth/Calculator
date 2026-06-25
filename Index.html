@@ -9,8 +9,19 @@
 </head>
 <body>
 
-<div class="sidebar">
-    <div class="sidebar-header">Desmos-Lite x Puter.js AI</div>
+<button class="mobile-toggle" onclick="toggleSidebar()">☰ Menu</button>
+<div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
+
+<div id="desmos-wrapper">
+    <button class="back-to-lite-btn" onclick="closeActualDesmos()">← Back to Lite Engine</button>
+    <div id="actual-desmos-engine"></div>
+</div>
+
+<div class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+        Desmos-Lite x AI
+        <button class="close-sidebar" onclick="toggleSidebar()">✕</button>
+    </div>
 
     <div class="ai-prompt-section">
         <div class="ai-input-wrapper">
@@ -18,12 +29,13 @@
             <button id="generate-btn" class="ai-btn" onclick="generateAiShape()">Generate</button>
         </div>
         <div id="ai-status" style="font-size: 0.8rem; color: #7f8c8d;">
-            Powered by Puter.js (Supports x=, y=, and pure math evaluations)
+            Powered by Puter.js (Supports x=, y=, and pure math)
         </div>
     </div>
 
     <div class="equation-list" id="eq-list"></div>
     <div class="add-btn" onclick="addEquation()">+ Add Expression</div>
+    <div class="export-btn" onclick="exportToDesmos()">↗ Open in Actual Desmos</div>
 </div>
 
 <div class="graph-container" id="graph-container">
