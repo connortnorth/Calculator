@@ -3,51 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Graphing Calculator</title>
+    <title>Desmos-Lite Graphing Engine</title>
     <link rel="stylesheet" href="Style.css">
 </head>
 <body>
 
-<div class="calculator">
-    <input type="text" class="display" id="display" disabled value="0">
+<div class="sidebar">
+    <div class="sidebar-header">Desmos-Lite</div>
 
-    <div class="buttons">
-        <button class="sci" onclick="calcSci('sin')">sin</button>
-        <button class="sci" onclick="calcSci('cos')">cos</button>
-        <button class="sci" onclick="calcSci('tan')">tan</button>
-        <button class="sci" onclick="calcSci('sqrt')">&radic;</button>
-
-        <button class="sci" onclick="appendOperator('**')">x<sup>y</sup></button>
-        <button class="sci" onclick="calcSci('log')">log</button>
-        <button class="sci" onclick="appendNumber('3.14159265')">&pi;</button>
-        <button class="var-key" onclick="appendNumber('x')">x</button>
-
-        <button class="plot-key" onclick="plotGraph()">Graph</button>
-        <button class="clear" id="clear-btn" onclick="clearDisplay()">C</button>
-        <button class="del-key" onclick="deleteChar()">DEL</button>
-        <button class="operator" onclick="appendOperator('/')">&divide;</button>
-
-        <button onclick="appendNumber('7')">7</button>
-        <button onclick="appendNumber('8')">8</button>
-        <button onclick="appendNumber('9')">9</button>
-        <button class="operator" onclick="appendOperator('*')">&times;</button>
-
-        <button onclick="appendNumber('4')">4</button>
-        <button onclick="appendNumber('5')">5</button>
-        <button onclick="appendNumber('6')">6</button>
-        <button class="operator" onclick="appendOperator('-')">-</button>
-
-        <button onclick="appendNumber('1')">1</button>
-        <button onclick="appendNumber('2')">2</button>
-        <button onclick="appendNumber('3')">3</button>
-        <button class="operator" onclick="appendOperator('+')">+</button>
-
-        <button class="zero-key" onclick="appendNumber('0')">0</button>
-        <button onclick="appendNumber('.')">.</button>
-        <button class="equals" onclick="calculateResult()">=</button>
+    <div class="ai-prompt-section">
+        <div class="ai-input-wrapper">
+            <input type="text" id="ai-prompt" class="ai-input" placeholder="Ask AI: 'Draw a circle'">
+            <button class="ai-btn" onclick="generateAiShape()">Generate</button>
+        </div>
+        <div style="font-size: 0.8rem; color: #7f8c8d;">
+            Try: "Draw a heart", "Draw a star", "Draw a spiral"
+        </div>
     </div>
 
-    <canvas id="graphCanvas" width="340" height="200"></canvas>
+    <div class="equation-list" id="eq-list"></div>
+    <div class="add-btn" onclick="addEquation()">+ Add Expression</div>
+</div>
+
+<div class="graph-container" id="graph-container">
+    <canvas id="graph"></canvas>
+    <div class="instructions">Scroll to Zoom • Click & Drag to Pan</div>
 </div>
 
 <script src="Script.js"></script>
