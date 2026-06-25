@@ -201,8 +201,6 @@ function exportToDesmos() {
     }
 
     if (sidebar.classList.contains('open')) toggleSidebar();
-
-    // FIXED BUG: Changed from style.zindex to style.display so overlay opens correctly!
     document.getElementById('desmos-wrapper').style.display = 'block';
 
     if (!isDesmosScriptLoaded) {
@@ -232,37 +230,88 @@ function initActualDesmos(eqs) {
 
 function closeActualDesmos() { document.getElementById('desmos-wrapper').style.display = 'none'; }
 
-// --- FIXED AND ENHANCED AI GENERATION ---
+// --- OPTIMIZED COST-TO-SMARTNESS AI FALLBACK CHAIN ---
 async function generateAiShape() {
     const prompt = promptInput.value.trim();
     if (!prompt) return;
 
     generateBtn.disabled = true;
     generateBtn.innerText = "Thinking...";
-    statusText.innerText = "Asking AI to calculate formulas...";
+    statusText.innerText = "Analyzing visual geometry bounds...";
     statusText.style.color = "#8e44ad";
 
+    // TARGETING HIGH COST-BENEFIT SWEET-SPOT MODELS
+    const modelsToTry = [
+        'gpt-4o-mini',
+        'gemini-1.5-flash',
+        'openai/gpt-4o-mini',
+        'google/gemini-1.5-flash'
+    ];
+
+    const systemInstruction = `You are a professional analytical visual graphics compiler that translates spatial illustration ideas into clean 2D coordinate geometry configurations.
+
+                CRITICAL PACKAGING RULE: You must return ONLY a raw, unquoted valid JSON array of objects. Do not wrap your response in markdown code blocks (\`\`\`json). No conversational text before or after.
+                Each object must contain exactly two properties: 'equation' (string) and 'color' (7-character hex code starting with #).
+
+                CRITICAL SPATIAL BLUEPRINT LAYERING RULES:
+                When a user requests an animal face (like a cat), human face, or organic stacked character shape, do NOT overlap random shapes blindly. Build it using a strict vector canvas layout stack:
+                1. Central Structural Head Anchor: First element must be a large encompassing perimeter (e.g. circle at origin (0,0) with radius 4 to 5).
+                2. Internal Face Parts: Offset interior geometry elements so they reside strictly WITHIN the head's container bounds.
+                   - Left Eye: Shifted to top-left quadrant inside circle. E.g. (x+1.5)^2 + (y-1)^2 <= 0.3
+                   - Right Eye: Shifted to top-right quadrant inside circle. E.g. (x-1.5)^2 + (y-1)^2 <= 0.3
+                   - Nose/Mouth: Centered lower inside the head boundary. E.g. centered near x=0, y=-1.
+                3. Connected Appendages (Ears/Whiskers): Calculate coordinates that anchor directly onto or clip into the outer skull perimeter.
+                   - Cat Ears: Placed above and outside the main circle perimeter (e.g., elevated y and spaced x offsets).
+
+                GEOMETRIC LOGIC SYNTAL:
+                - Shading Regions (Inequalities): Use standard operational comparisons (<, >, <=, >=).
+                - Vector Clipping: Add conditional restriction limits to the end using separate curly braces '{...}'.
+                - NEVER mix bounds inside a single bracket block (use "{x > 0}{x < 5}", NEVER "{0 < x < 5}").
+
+                Production Target Architecture Example:
+                - Prompt: "A cat face"
+                  Output: [
+                    {"equation": "x^2 + y^2 <= 16", "color": "#2c3e50"},
+                    {"equation": "(x+1.5)^2 + (y-1)^2 <= 0.2", "color": "#ffffff"},
+                    {"equation": "(x-1.5)^2 + (y-1)^2 <= 0.2", "color": "#ffffff"},
+                    {"equation": "y <= -1 {y >= -1.5} {x >= -1} {x <= 1}", "color": "#e74c3c"},
+                    {"equation": "(x+2.5)^2 + (y-3.5)^2 <= 1.5", "color": "#2c3e50"},
+                    {"equation": "(x-2.5)^2 + (y-3.5)^2 <= 1.5", "color": "#2c3e50"}
+                  ]`;
+
+    let response = null;
+    let currentModelName = "Auto-Router Node";
+
+    for (let i = 0; i < modelsToTry.length; i++) {
+        try {
+            statusText.innerText = `Compiling on optimized node [${modelsToTry[i]}]...`;
+            response = await puter.ai.chat([
+                { role: "system", content: systemInstruction },
+                { role: "user", content: prompt }
+            ], { model: modelsToTry[i] });
+
+            if (response) {
+                currentModelName = modelsToTry[i];
+                break;
+            }
+        } catch (err) {
+            console.warn(`Model variant unavailable: ${modelsToTry[i]}. Transitioning fallback path...`);
+        }
+    }
+
+    if (!response) {
+        try {
+            statusText.innerText = "Routing request through baseline fallback node...";
+            response = await puter.ai.chat([
+                { role: "system", content: systemInstruction },
+                { role: "user", content: prompt }
+            ]);
+        } catch (finalErr) {
+            throw new Error("All cloud computation pathways are currently saturated. Try again in a moment.");
+        }
+    }
+
     try {
-        const systemInstruction = `You are a mathematical graphing assistant. The user wants to draw: "${prompt}".
-                CRITICAL RULE: You must return ONLY a raw valid JSON array of objects. Do not include markdown blocks or text conversation.
-                Each object must have exactly two properties: 'equation' (string) and 'color' (a strict 7-character hex code starting with #).
-
-                You must actively leverage general graphing capabilities when requested:
-                1. Explicit curves: "y = x^2", "x = sin(y)"
-                2. Implicit shapes/Circles/Conics: "x^2 + y^2 = 9"
-                3. Shaded Regions / Inequalities: Use strict symbols like "x^2 + y^2 < 10", "y >= x^2", or "y < sin(x)".
-                4. Domain Boundaries: Add conditional clipping bounds at the end using brackets like "y = x^2 {x < 2}" or "x^2 + y^2 <= 16 {x > 0}".
-                If multiple conditions apply, chain brackets: "{x > 0}{y < 3}". Do not join expressions inside a single bracket like "{0 < x < 5}".
-
-                Example output format:
-                [{"equation": "x^2 + y^2 < 10", "color": "#2d70b3"}, {"equation": "y = x^2 {x < 2}", "color": "#c74440"}]`;
-
-        const response = await puter.ai.chat([
-            { role: "system", content: systemInstruction },
-            { role: "user", content: prompt }
-        ]);
-
-        // FIXED BUG: Safe unwrap engine dynamically intercepts any string or nested object layout Puter throws back
         let aiText = '';
         if (typeof response === 'string') {
             aiText = response;
@@ -274,7 +323,6 @@ async function generateAiShape() {
             aiText = JSON.stringify(response);
         }
 
-        // Isolate JSON block arrays securely
         const arrayMatch = aiText.match(/\[\s*\{[\s\S]*\}\s*\]/);
         if (arrayMatch) {
             aiText = arrayMatch[0];
@@ -291,14 +339,14 @@ async function generateAiShape() {
         scale = 50; offsetX = canvas.width / 2; offsetY = canvas.height / 2;
         draw();
 
-        statusText.innerText = "Success! Shape generated.";
+        statusText.innerText = `Success! Rendered efficiently via ${currentModelName}.`;
         statusText.style.color = "#27ae60";
 
         if (window.innerWidth <= 768 && sidebar.classList.contains('open')) toggleSidebar();
 
     } catch (error) {
         console.error(error);
-        statusText.innerText = `AI Error: ${error.message || 'Check if internet connection is loose.'}`;
+        statusText.innerText = `Compilation Error: Data syntax malformed. Try rephrasing your prompt.`;
         statusText.style.color = "#e74c3c";
     } finally {
         generateBtn.disabled = false; generateBtn.innerText = "Generate";
@@ -329,7 +377,6 @@ function draw() {
         let rawExpr = eq.element.value.trim().replace(/\s+/g, '').toLowerCase();
         if (!rawExpr) return;
 
-        // 1. EXTRACT TRAILING BOUNDARY CONDITIONS
         let coreExpr = rawExpr;
         let boundaryStrings = [];
         coreExpr = coreExpr.replace(/\{([^}]+)\}/g, (match, condition) => {
@@ -349,7 +396,6 @@ function draw() {
             checkBoundaries(0, 0);
         } catch (e) { return; }
 
-        // 2. ISOLATE STRUCTURE OPERATORS
         let operatorMatch = coreExpr.match(/(>=|<=|>|<|=)/);
         let operator, lhs, rhs;
 
@@ -366,8 +412,6 @@ function draw() {
         let isExplicitY = (lhs === 'y' && !rhs.includes('y'));
         let isExplicitX = (lhs === 'x' && !rhs.includes('x'));
         let isImplicit = !isExplicitY && !isExplicitX;
-
-        // --- RENDERING STRATEGIES ---
 
         // CASE A: INEQUALITY REGION SHADING
         if (isInequality) {
@@ -410,7 +454,7 @@ function draw() {
             ctx.drawImage(offCanvas, 0, 0, offW, offH, 0, 0, canvas.width, canvas.height);
         }
 
-        // CASE B: IMPLICIT EQUATION & INEQ BOUNDARIES (e.g. conics, conics boundary lines)
+        // CASE B: IMPLICIT EQUATION & BOUNDARIES
         if (isImplicit) {
             let fValue;
             try {
