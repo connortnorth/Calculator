@@ -201,7 +201,9 @@ function exportToDesmos() {
     }
 
     if (sidebar.classList.contains('open')) toggleSidebar();
-    document.getElementById('desmos-wrapper').style.zindex = 'block';
+
+    // FIXED BUG: Changed from style.zindex to style.display so overlay opens correctly!
+    document.getElementById('desmos-wrapper').style.display = 'block';
 
     if (!isDesmosScriptLoaded) {
         const script = document.createElement('script');
@@ -255,15 +257,24 @@ async function generateAiShape() {
                 Example output format:
                 [{"equation": "x^2 + y^2 < 10", "color": "#2d70b3"}, {"equation": "y = x^2 {x < 2}", "color": "#c74440"}]`;
 
-        // REMOVED explicit model parameter to let Puter auto-route to active API nodes
         const response = await puter.ai.chat([
             { role: "system", content: systemInstruction },
             { role: "user", content: prompt }
         ]);
 
-        let aiText = response.message.content;
+        // FIXED BUG: Safe unwrap engine dynamically intercepts any string or nested object layout Puter throws back
+        let aiText = '';
+        if (typeof response === 'string') {
+            aiText = response;
+        } else if (response && response.message && response.message.content) {
+            aiText = response.message.content;
+        } else if (response && response.text) {
+            aiText = response.text;
+        } else {
+            aiText = JSON.stringify(response);
+        }
 
-        // Robust RegEx Shield extraction to isolate only the JSON array block [...]
+        // Isolate JSON block arrays securely
         const arrayMatch = aiText.match(/\[\s*\{[\s\S]*\}\s*\]/);
         if (arrayMatch) {
             aiText = arrayMatch[0];
@@ -287,8 +298,7 @@ async function generateAiShape() {
 
     } catch (error) {
         console.error(error);
-        // EXPOSE the exact issue inside the browser interface for easier debugging
-        statusText.innerText = `AI Error: ${error.message || 'Check if a pop-up window was blocked.'}`;
+        statusText.innerText = `AI Error: ${error.message || 'Check if internet connection is loose.'}`;
         statusText.style.color = "#e74c3c";
     } finally {
         generateBtn.disabled = false; generateBtn.innerText = "Generate";
@@ -319,6 +329,7 @@ function draw() {
         let rawExpr = eq.element.value.trim().replace(/\s+/g, '').toLowerCase();
         if (!rawExpr) return;
 
+        // 1. EXTRACT TRAILING BOUNDARY CONDITIONS
         let coreExpr = rawExpr;
         let boundaryStrings = [];
         coreExpr = coreExpr.replace(/\{([^}]+)\}/g, (match, condition) => {
@@ -338,6 +349,7 @@ function draw() {
             checkBoundaries(0, 0);
         } catch (e) { return; }
 
+        // 2. ISOLATE STRUCTURE OPERATORS
         let operatorMatch = coreExpr.match(/(>=|<=|>|<|=)/);
         let operator, lhs, rhs;
 
@@ -354,6 +366,8 @@ function draw() {
         let isExplicitY = (lhs === 'y' && !rhs.includes('y'));
         let isExplicitX = (lhs === 'x' && !rhs.includes('x'));
         let isImplicit = !isExplicitY && !isExplicitX;
+
+        // --- RENDERING STRATEGIES ---
 
         // CASE A: INEQUALITY REGION SHADING
         if (isInequality) {
@@ -396,8 +410,8 @@ function draw() {
             ctx.drawImage(offCanvas, 0, 0, offW, offH, 0, 0, canvas.width, canvas.height);
         }
 
-        // CASE B: IMPLICIT EQUATION BOUNDARIES
-        if (!isInequality && isImplicit) {
+        // CASE B: IMPLICIT EQUATION & INEQ BOUNDARIES (e.g. conics, conics boundary lines)
+        if (isImplicit) {
             let fValue;
             try {
                 fValue = new Function('x', 'y', 'return (' + parseMathText(lhs) + ') - (' + parseMathText(rhs) + ')');
@@ -454,8 +468,8 @@ function draw() {
             ctx.drawImage(offCanvas, 0, 0, offW, offH, 0, 0, canvas.width, canvas.height);
         }
 
-        // CASE C: EXPLICIT LOGIC BOUNDARIES
-        if (!isInequality && !isImplicit) {
+        // CASE C: EXPLICIT LOGIC LINE VECTORS
+        if (!isImplicit) {
             let parsedBoundary = parseMathText(rhs);
             let fLine;
             let independentVar = isExplicitY ? 'x' : 'y';
