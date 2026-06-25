@@ -24,8 +24,8 @@ promptInput.addEventListener('keypress', function (e) {
 });
 
 function resizeCanvas() {
-    canvas.width = container.clientWidth || window.innerWidth;
-    canvas.height = container.clientHeight || window.innerHeight;
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
     if (offsetX === 0 && offsetY === 0) {
         offsetX = canvas.width / 2;
         offsetY = canvas.height / 2;
@@ -34,12 +34,15 @@ function resizeCanvas() {
 }
 window.addEventListener('resize', resizeCanvas);
 
+// --- NEW: Color Normalizer Firewall ---
 function normalizeColor(c) {
     if (!c) return null;
     let colorStr = c.trim();
+    // If the AI forgot the hash but gave 3 or 6 hex digits, add the hash
     if (/^[0-9A-Fa-f]{6}$/.test(colorStr) || /^[0-9A-Fa-f]{3}$/.test(colorStr)) {
         colorStr = '#' + colorStr;
     }
+    // Ask the browser's hidden canvas to translate ANY valid CSS color (like "red" or "#f00") into strict "#rrggbb"
     const tempCtx = document.createElement('canvas').getContext('2d');
     tempCtx.fillStyle = colorStr;
     return tempCtx.fillStyle;
@@ -47,6 +50,8 @@ function normalizeColor(c) {
 
 function addEquation(initialMath = '', specificColor = null) {
     const id = Date.now() + Math.random();
+
+    // Pass the incoming color through our firewall
     let color = specificColor ? normalizeColor(specificColor) : defaultColors[equations.length % defaultColors.length];
 
     const row = document.createElement('div');
@@ -173,6 +178,7 @@ function textToLatex(text) {
     return latex;
 }
 
+// --- EXPORT TO ACTUAL DESMOS ---
 let actualDesmosCalc = null;
 let isDesmosScriptLoaded = false;
 
@@ -219,66 +225,32 @@ function initActualDesmos(eqs) {
 
 function closeActualDesmos() { document.getElementById('desmos-wrapper').style.display = 'none'; }
 
+// --- AI GENERATION ---
 async function generateAiShape() {
     const prompt = promptInput.value.trim();
     if (!prompt) return;
 
     generateBtn.disabled = true;
     generateBtn.innerText = "Thinking...";
-    statusText.innerText = "Connecting to AI...";
+    statusText.innerText = "Asking AI to calculate formulas...";
     statusText.style.color = "#8e44ad";
 
     try {
-        // --- Vercel / External Domain Auth Check ---
-        const signedIn = await puter.isSignedIn();
-        if (!signedIn) {
-            statusText.innerText = "Waiting for Puter sign-in...";
-            await puter.signIn();
-        }
-
-        statusText.innerText = "Asking AI to calculate formulas...";
-
-        // --- STRICTER SYSTEM PROMPT ---
-        const systemInstruction = `You are a strict JSON-only mathematical graphing API. The user wants to draw: "${prompt}". 
-                You MUST return ONLY a valid JSON array of objects. Do NOT use markdown formatting like \`\`\`json. Do NOT include any conversational text.
-                Format exactly like this:
-                [
-                  {"equation": "x^2 + y^2 <= 25", "color": "#ff0000"},
-                  {"equation": "y = x", "color": "#00ff00"}
-                ]
-                Use 7-character hex codes for color.`;
+        // Upgraded prompt to strictly force a 7-character hex string
+        const systemInstruction = `You are a mathematical graphing assistant. The user wants to draw: "${prompt}".
+                You must return ONLY a raw JSON array of objects.
+                Each object must have two properties: 'equation' (string) and 'color' (a strict 7-character hex code starting with #, like "#ff0000").
+                Use standard functional formats like "y = x^2" or implicit inequalities like "x^2 + y^2 <= 25".
+                Do not include markdown code blocks. Just the raw array of objects.`;
 
         const response = await puter.ai.chat([
             { role: "system", content: systemInstruction },
             { role: "user", content: prompt }
         ], { model: "google/gemini-3.5-flash" });
 
-        let aiText = response.message.content.trim();
+        let aiText = response.message.content.replace(/```json/g, '').replace(/```/g, '').trim();
+        const newEquations = JSON.parse(aiText);
 
-        // Debugging
-        console.log("Raw AI Response:", aiText);
-
-        // --- MULTI-LAYERED JSON CLEANUP ---
-        if (aiText.startsWith('```json')) aiText = aiText.replace(/```json/i, '');
-        if (aiText.startsWith('```')) aiText = aiText.replace(/```/g, '');
-        aiText = aiText.replace(/```/g, '').trim();
-
-        let jsonString = aiText;
-        const startIndex = aiText.indexOf('[');
-        const endIndex = aiText.lastIndexOf(']');
-
-        if (startIndex !== -1 && endIndex !== -1) {
-            jsonString = aiText.substring(startIndex, endIndex + 1);
-        }
-
-        // 3. Parse it
-        const newEquations = JSON.parse(jsonString);
-
-        if (!Array.isArray(newEquations)) {
-            throw new Error("Parsed JSON is not an array.");
-        }
-
-        // --- SUCCESS RENDER ---
         eqList.innerHTML = '';
         equations = [];
         newEquations.forEach(item => addEquation(item.equation, item.color));
@@ -292,85 +264,33 @@ async function generateAiShape() {
         if (window.innerWidth <= 768 && sidebar.classList.contains('open')) toggleSidebar();
 
     } catch (error) {
-        console.error("AI Parsing Error:", error);
-
-        if (error.message && error.message.toLowerCase().includes('sign in')) {
-            statusText.innerText = "Sign-in required to use AI here.";
-        } else {
-            statusText.innerText = "AI Error: Could not understand shape. Try rephrasing.";
-        }
+        statusText.innerText = "AI Error: Could not generate shape. Try rephrasing.";
         statusText.style.color = "#e74c3c";
     } finally {
         generateBtn.disabled = false; generateBtn.innerText = "Generate";
     }
 }
 
-// --- RENDER LOOP WITH DYNAMIC AXES ---
+// --- RENDER LOOP ---
 function draw() {
-    if (!canvas.width || !canvas.height) return;
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const minPixelsBetweenLines = 70;
-    const rawMathStep = minPixelsBetweenLines / scale;
-
-    const magnitude = Math.pow(10, Math.floor(Math.log10(rawMathStep)));
-    const residual = rawMathStep / magnitude;
-    let stepMultiplier = 1;
-    if (residual > 5) stepMultiplier = 10;
-    else if (residual > 2) stepMultiplier = 5;
-    else if (residual > 1) stepMultiplier = 2;
-
-    const mathStep = stepMultiplier * magnitude;
-    const pixelStep = mathStep * scale;
-
-    ctx.font = '12px "Courier New", Courier, monospace';
-    ctx.fillStyle = '#7f8c8d';
-
+    // Draw Grid & Axes
     ctx.lineWidth = 1; ctx.strokeStyle = '#e0e0e0'; ctx.beginPath();
-    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-
-    let firstMathX = Math.floor((-offsetX) / pixelStep) * mathStep;
-    for (let mathX = firstMathX; (offsetX + mathX * scale) < canvas.width; mathX += mathStep) {
-        let px = offsetX + mathX * scale;
-        ctx.moveTo(px, 0); ctx.lineTo(px, canvas.height);
-
-        if (Math.abs(mathX) > 1e-10) {
-            let textY = Math.max(5, Math.min(canvas.height - 20, offsetY + 5));
-            let label = parseFloat(mathX.toPrecision(12)).toString();
-            ctx.fillText(label, px, textY);
-        }
-    }
+    let startX = (offsetX % scale) - scale;
+    for (let x = startX; x < canvas.width; x += scale) { ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); }
+    let startY = (offsetY % scale) - scale;
+    for (let y = startY; y < canvas.height; y += scale) { ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); }
     ctx.stroke();
 
-    ctx.beginPath();
-    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-
-    let firstMathY = Math.floor((offsetY - canvas.height) / pixelStep) * mathStep;
-    for (let mathY = firstMathY; (offsetY - mathY * scale) > 0; mathY += mathStep) {
-        let py = offsetY - mathY * scale;
-        ctx.moveTo(0, py); ctx.lineTo(canvas.width, py);
-
-        if (Math.abs(mathY) > 1e-10) {
-            let textX = Math.max(25, Math.min(canvas.width - 5, offsetX - 5));
-            let label = parseFloat(mathY.toPrecision(12)).toString();
-            ctx.fillText(label, textX, py);
-        }
-    }
-    ctx.stroke();
-
-    ctx.lineWidth = 2; ctx.strokeStyle = '#2c3e50'; ctx.beginPath();
+    ctx.lineWidth = 2; ctx.strokeStyle = '#000000'; ctx.beginPath();
     if (offsetY >= 0 && offsetY <= canvas.height) { ctx.moveTo(0, offsetY); ctx.lineTo(canvas.width, offsetY); }
     if (offsetX >= 0 && offsetX <= canvas.width) { ctx.moveTo(offsetX, 0); ctx.lineTo(offsetX, canvas.height); }
     ctx.stroke();
 
-    ctx.textAlign = 'right'; ctx.textBaseline = 'top';
-    let originX = Math.max(15, Math.min(canvas.width - 5, offsetX - 5));
-    let originY = Math.max(5, Math.min(canvas.height - 15, offsetY + 5));
-    ctx.fillText("0", originX, originY);
-
     equations.forEach(eq => {
         if (eq.type !== 'graph') return;
+
         let rawExpr = eq.element.value.trim().replace(/\s+/g, '').toLowerCase();
         if (!rawExpr) return;
 
@@ -383,7 +303,9 @@ function draw() {
             lhs = parts[0].trim();
             rhs = parts[1].trim();
         } else {
-            operator = '='; lhs = 'y'; rhs = rawExpr;
+            operator = '=';
+            lhs = 'y';
+            rhs = rawExpr;
         }
 
         let isInequality = operator !== '=';
@@ -403,7 +325,8 @@ function draw() {
             let offH = Math.ceil(canvas.height * res);
 
             let offCanvas = document.createElement('canvas');
-            offCanvas.width = offW; offCanvas.height = offH;
+            offCanvas.width = offW;
+            offCanvas.height = offH;
             let offCtx = offCanvas.getContext('2d');
             let imgData = offCtx.createImageData(offW, offH);
             let data = imgData.data;
@@ -419,7 +342,10 @@ function draw() {
                     let mathX = ((px / res) - offsetX) / scale;
                     try {
                         if (fShader(mathX, mathY)) {
-                            data[index] = rgb[0]; data[index+1] = rgb[1]; data[index+2] = rgb[2]; data[index+3] = 60;
+                            data[index] = rgb[0];
+                            data[index+1] = rgb[1];
+                            data[index+2] = rgb[2];
+                            data[index+3] = 60;
                         }
                     } catch(e) {}
                     index += 4;
@@ -442,8 +368,11 @@ function draw() {
             ctx.strokeStyle = eq.color;
             ctx.lineWidth = 2.5;
 
-            if (operator === '<' || operator === '>') ctx.setLineDash([5, 5]);
-            else ctx.setLineDash([]);
+            if (operator === '<' || operator === '>') {
+                ctx.setLineDash([5, 5]);
+            } else {
+                ctx.setLineDash([]);
+            }
 
             let firstPoint = true;
 
@@ -474,75 +403,30 @@ function draw() {
     });
 }
 
-// --- SAFER MOBILE TOUCH EVENTS ---
-let isDragging = false;
-let lastMouseX, lastMouseY;
-let lastPinchDist = null;
-
-function getPinchDistance(touches) {
-    const dx = touches[0].clientX - touches[1].clientX;
-    const dy = touches[0].clientY - touches[1].clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-}
-
+// --- INTERACTIVITY ---
+let isDragging = false; let lastMouseX, lastMouseY;
 canvas.addEventListener('mousedown', (e) => { isDragging = true; lastMouseX = e.clientX; lastMouseY = e.clientY; });
-
 canvas.addEventListener('touchstart', (e) => {
-    if (e.cancelable) e.preventDefault();
-
-    if (e.touches.length === 1) {
-        isDragging = true; lastMouseX = e.touches[0].clientX; lastMouseY = e.touches[0].clientY;
-    } else if (e.touches.length === 2) {
-        lastPinchDist = getPinchDistance(e.touches);
-    }
+    if (e.touches.length === 1) { isDragging = true; lastMouseX = e.touches[0].clientX; lastMouseY = e.touches[0].clientY; }
 });
-
 window.addEventListener('mouseup', () => { isDragging = false; });
-window.addEventListener('touchend', (e) => {
-    if (e.touches.length < 2) lastPinchDist = null;
-    if (e.touches.length === 0) isDragging = false;
-});
-
+window.addEventListener('touchend', () => { isDragging = false; });
 window.addEventListener('mousemove', (e) => {
     if (!isDragging) return;
     offsetX += e.clientX - lastMouseX; offsetY += e.clientY - lastMouseY;
     lastMouseX = e.clientX; lastMouseY = e.clientY; draw();
 });
-
 canvas.addEventListener('touchmove', (e) => {
-    if (e.cancelable) e.preventDefault();
-
-    if (e.touches.length === 1 && isDragging) {
-        offsetX += e.touches[0].clientX - lastMouseX; offsetY += e.touches[0].clientY - lastMouseY;
-        lastMouseX = e.touches[0].clientX; lastMouseY = e.touches[0].clientY; draw();
-    } else if (e.touches.length === 2 && lastPinchDist) {
-        const newPinchDist = getPinchDistance(e.touches);
-        const zoomFactor = newPinchDist / lastPinchDist;
-        scale *= zoomFactor;
-
-        const pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-        const pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-
-        const canvasRect = canvas.getBoundingClientRect();
-        const mouseX = pinchX - canvasRect.left;
-        const mouseY = pinchY - canvasRect.top;
-
-        offsetX = mouseX - (mouseX - offsetX) * zoomFactor;
-        offsetY = mouseY - (mouseY - offsetY) * zoomFactor;
-
-        lastPinchDist = newPinchDist;
-        draw();
-    }
+    if (!isDragging || e.touches.length !== 1) return;
+    offsetX += e.touches[0].clientX - lastMouseX; offsetY += e.touches[0].clientY - lastMouseY;
+    lastMouseX = e.touches[0].clientX; lastMouseY = e.touches[0].clientY; draw();
 });
-
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault(); const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9; scale *= zoomFactor;
     const mouseX = e.clientX - canvas.getBoundingClientRect().left; const mouseY = e.clientY - canvas.getBoundingClientRect().top;
     offsetX = mouseX - (mouseX - offsetX) * zoomFactor; offsetY = mouseY - (mouseY - offsetY) * zoomFactor; draw();
 });
 
-window.onload = () => {
-    resizeCanvas();
-    addEquation('x^2 + y^2 <= 25', '#3498db');
-    addEquation('y > x^2 - 4', '#e74c3c');
-};
+resizeCanvas();
+addEquation('x^2 + y^2 <= 25', '#3498db');
+addEquation('y > x^2 - 4', '#e74c3c');
