@@ -145,11 +145,12 @@ CRITICAL DRAFTING & MATH INSTRUCTIONS:
    - Tier 3: Fine accents, highlights, textures, or shadows (pupils, spots, patterns).
 
 2. ADVANCED GEOMETRIC SHAPING & CLIPPING:
-   - Avoid free-floating unclipped circles. To make organic parts (like ears, horns, or custom shapes), overlap equations and use strict domain restrictions.
-   - Use chained curly brackets for precise clipping bounds.
-     CORRECT: y = x^2 {x > -2}{x < 2}{y < 3}
-     INCORRECT: {0 < x < 5} or {-2 < x < 2}
-   - Never use logical operators (&&, ||, AND, OR, !). Use separate chained brackets for intersections.
+   - Avoid free-floating unclipped circles. To make organic parts (like ears, horns, or custom shapes), overlap equations and use domain/range restrictions using curly brackets {} when necessary. Clipping bounds are entirely optional but highly recommended for styling distinct features.
+   - You can use either single-condition brackets or standard mathematical compound inequality bounds inside the curly brackets.
+     CORRECT COMPOUND BOUNDS: y = x^2 {0 <= x < 5} or y = -x + 3 {-2 < y <= 4}
+     CORRECT CHAINED BOUNDS: y = x^2 {x > -2}{x < 2}
+     ALSO CORRECT: y = x^2 (if no bounding restrictions are needed)
+   - Never use logical JavaScript syntax (&&, ||, AND, OR, !). Use the standard mathematical compound layout or separate chained brackets for intersections.
 
 3. SOLID SHADING & LAYERING:
    - Prioritize filled shapes using inequalities (<, >, <=, >=) to give the object physical substance.
@@ -162,15 +163,13 @@ CRITICAL DRAFTING & MATH INSTRUCTIONS:
 Example output format:
 [
   {"label": "head background fill", "equation": "x^2+(y-2)^2<=16", "color": "#f1c40f"},
-  {"label": "left ear upper curve", "equation": "y=-x^2+5 {x>-3}{x<-1}{y>2}", "color": "#e74c3c"}
+  {"label": "left ear upper curve", "equation": "y=-x^2+5 {-3 < x < -1}{y>2}", "color": "#e74c3c"}
 ]`;
 
-        // Writes prompt text straight to system clipboard and navigates directly to Gemini base address
         navigator.clipboard.writeText(constructedPrompt).then(() => {
             window.open('https://gemini.google.com', '_blank');
         }).catch(err => {
             console.error('Could not write prompt to clipboard: ', err);
-            // Fallback action if permissions fail
             window.open('https://gemini.google.com', '_blank');
         });
     }
@@ -313,8 +312,16 @@ Example output format:
     }
 
     function parseMathText(expr) {
-        let parsed = expr.toLowerCase()
-            .replace(/\s+/g, '')
+        let clean = expr.toLowerCase().replace(/\s+/g, '');
+
+        // Handle compound mathematical inequalities seamlessly (e.g., -5<=x<2 or 0<y<=3)
+        const compoundRegex = /^([^<>=]+)(<=|>=|<|>)([^<>=]+)(<=|>=|<|>)([^<>=]+)$/;
+        const match = clean.match(compoundRegex);
+        if (match) {
+            return `(${parseMathText(match[1])} ${match[2]} ${parseMathText(match[3])}) && (${parseMathText(match[3])} ${match[4]} ${parseMathText(match[5])})`;
+        }
+
+        let parsed = clean
             .replace(/(\d)([xXyY\(a-zA-Z])/g, '$1*$2')
             .replace(/([xXyY\)])(\d)/g, '$1*$2')
             .replace(/\^/g, '**')
