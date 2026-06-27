@@ -2,9 +2,6 @@ const canvas = document.getElementById('graph');
 const ctx = canvas.getContext('2d');
 const container = document.getElementById('graph-container');
 const eqList = document.getElementById('eq-list');
-const promptInput = document.getElementById('ai-prompt');
-const generateBtn = document.getElementById('generate-btn');
-const statusText = document.getElementById('ai-status');
 const sidebar = document.getElementById('sidebar');
 const overlay = document.getElementById('overlay');
 
@@ -13,19 +10,116 @@ let equations = [];
 let scale = 50;
 let offsetX = 0;
 let offsetY = 0;
+let actualDesmosCalc = null;
+let isDesmosScriptLoaded = false;
+
+// --- DARK MODE LOGIC ---
+function toggleDarkMode() {
+    const isDarkMode = document.body.classList.toggle('dark-mode');
+    if (actualDesmosCalc) {
+        actualDesmosCalc.setGraphSettings({ invertedColors: isDarkMode });
+    }
+    draw();
+}
+
+// --- IMPORT / CLIPBOARD LOGIC ---
+function openGeminiWithPrompt() {
+    const userIdea = document.getElementById('user-idea').value.trim() || "something incredibly creative";
+
+    let cleanIdea = userIdea.replace(/^(draw|make|create|graph|render|sketch)\s+(a|an|the)?\s*/i, '').trim();
+    if (!cleanIdea) cleanIdea = userIdea;
+
+    const constructedPrompt = `You are an elite mathematical artist, master draftsman, and Desmos geometry expert. Your task is to mathematically model and creatively render the structural form, key proportions, and distinguishing features of a: "${cleanIdea}".
+
+Avoid relying on primitive geometric configurations (like plain rectangles, basic circles, or standard triangles). Instead, you are highly encouraged to leverage complex, advanced, high-level mathematical relations. Our custom rendering engine natively supports full multi-variable implicit formulas, conic sections (hyperbolas, rotated ellipses, parabolas), trigonometric structures, rational expressions, and polynomial equations. Feel free to use complex models like equations balancing variables on both sides (e.g., x^2 + xy = y^2 - cos(x)).
+
+Respond ONLY with a valid JSON array of objects. Do not use markdown blocks, backticks, or any conversational text.
+
+Each object in the array must have exactly three keys:
+- "label": A brief descriptive string naming the exact part of the object being drawn (e.g., "left horn tip", "upper snout outline"). This is critical for structural planning.
+- "equation": A string containing a valid math equation or inequality.
+- "color": A specific hex color string that matches a cohesive, realistic color palette for the object.
+
+CRITICAL DRAFTING & MATH INSTRUCTIONS:
+1. THE ASSEMBLY PROCESS: Write between 15 to 40 equations ordered logically. Use organic curves, multi-variable lines, and dynamic mathematical structures to map intricate lines.
+2. ADVANCED GEOMETRIC SHAPING & CLIPPING:
+   - To make organic parts or custom shapes, overlap equations and use domain/range restrictions using curly brackets {} when necessary. Clipping bounds are entirely optional but highly recommended for styling distinct features.
+   - You can use either single-condition brackets or standard mathematical compound inequality bounds inside the curly brackets.
+     CORRECT COMPOUND BOUNDS: y = x^2 {0 <= x < 5} or y = -x + 3 {-2 < y <= 4}
+     CORRECT CHAINED BOUNDS: y = x^2 {x > -2}{x < 2}
+     ALSO CORRECT: y = x^2 (if no bounding restrictions are needed)
+   - Never use logical JavaScript syntax (&&, ||, AND, OR, !). Use the standard mathematical compound layout or separate chained brackets for intersections.
+
+3. SOLID SHADING & LAYERING:
+   - Prioritize filled shapes using inequalities (<, >, <=, >=) to give the object physical substance.
+   - Layer elements intentionally. Since equations render sequentially, place larger background fills first, then layer smaller detail inequalities on top of them.
+
+4. COORDINATE MAPPING & SCALE:
+   - Center the main focal point of the drawing at the origin (0,0).
+   - Scale the entire composition beautifully to fit within a standard -10 to 10 grid view on both axes.
+
+Example output format:
+[
+  {"label": "head background fill", "equation": "x^2+x*y+y^2<=16", "color": "#f1c40f"},
+  {"label": "jaw profile curve", "equation": "x+y=2*y-7 {-3 < x < 5}", "color": "#e74c3c"}
+]`;
+
+    navigator.clipboard.writeText(constructedPrompt).then(() => {
+        window.open('https://gemini.google.com', '_blank');
+    }).catch(err => {
+        console.error('Could not write prompt to clipboard: ', err);
+        window.open('https://gemini.google.com', '_blank');
+    });
+}
+
+async function readClipboardAndLoad() {
+    try {
+        const clipboardText = await navigator.clipboard.readText();
+        const cleanCode = clipboardText.replace(/```json/g, '').replace(/```/g, '').trim();
+
+        if (!cleanCode) {
+            alert("Your clipboard seems to be empty. Copy the JSON structure returned from Gemini first!");
+            return;
+        }
+
+        const newEquations = JSON.parse(cleanCode);
+
+        // Clear current board
+        while(equations.length > 0) {
+            deleteEquation(equations[0].id);
+        }
+
+        // Inject new equations with color and custom labels preserved as text hints
+        newEquations.forEach(item => {
+            const mathStr = item.equation || item.math || "";
+            const colorStr = item.color || null;
+            const labelStr = item.label || "";
+            if (mathStr) {
+                addEquation(mathStr, colorStr, labelStr);
+            }
+        });
+
+        // Reset viewport
+        offsetX = canvas.width / 2;
+        offsetY = canvas.height / 2;
+        scale = 50;
+        draw();
+
+    } catch (err) {
+        console.error(err);
+        alert("Error reading clipboard or parsing data. Make sure you copied the full valid JSON block from Gemini, and that clipboard permissions are enabled.");
+    }
+}
+// ---------------------------
 
 function toggleSidebar() {
     sidebar.classList.toggle('open');
     overlay.classList.toggle('active');
 }
 
-promptInput.addEventListener('keypress', function (e) {
-    if (e.key === 'Enter') { e.preventDefault(); generateAiShape(); }
-});
-
 function resizeCanvas() {
-    canvas.width = container.clientWidth;
-    canvas.height = container.clientHeight;
+    canvas.width = container.clientWidth || window.innerWidth;
+    canvas.height = container.clientHeight || window.innerHeight;
     if (offsetX === 0 && offsetY === 0) {
         offsetX = canvas.width / 2;
         offsetY = canvas.height / 2;
@@ -45,7 +139,7 @@ function normalizeColor(c) {
     return tempCtx.fillStyle;
 }
 
-function addEquation(initialMath = '', specificColor = null) {
+function addEquation(initialMath = '', specificColor = null, labelText = '') {
     const id = Date.now() + Math.random();
     let color = specificColor ? normalizeColor(specificColor) : defaultColors[equations.length % defaultColors.length];
 
@@ -53,11 +147,11 @@ function addEquation(initialMath = '', specificColor = null) {
     row.className = 'equation-row';
     row.id = `row-${id}`;
     row.innerHTML = `
-                <div class="color-picker-wrapper" id="color-wrap-${id}" style="background-color: ${color};">
+                <div class="color-picker-wrapper" id="color-wrap-${id}" style="background-color: ${color};" title="${labelText || 'Color Picker'}">
                     <input type="color" class="color-picker" id="color-${id}" value="${color}">
                 </div>
                 <div class="math-input-container">
-                    <input type="text" class="math-input" placeholder="e.g. x^2+y^2 <= 10 {x > 0}" value="${initialMath}">
+                    <input type="text" class="math-input" placeholder="e.g. y > x^2" value="${initialMath}" title="${labelText || 'Equation input'}">
                     <span class="eval-result" id="eval-${id}"></span>
                 </div>
                 <button class="delete-btn" onclick="deleteEquation(${id})" title="Delete equation">✕</button>
@@ -81,7 +175,7 @@ function addEquation(initialMath = '', specificColor = null) {
     equations.push({ id, element: input, color: color, type: 'graph' });
 
     handleRowEvaluation(id, initialMath);
-    if (!specificColor) input.focus();
+    if (!specificColor && !initialMath) input.focus();
     draw();
 }
 
@@ -94,15 +188,13 @@ function deleteEquation(id) {
 
 function handleRowEvaluation(id, text) {
     const cleanText = text.replace(/\s+/g, '').toLowerCase();
-    const resultSpan = document.getElementById('eval-' + id);
+    const resultSpan = document.getElementById(`eval-${id}`);
     const eqIndex = equations.findIndex(eq => eq.id === id);
-    if (eqIndex === -1 || !resultSpan) return;
+    if (eqIndex === -1) return;
 
-    const cleanMathOnly = cleanText.replace(/\{[^}]+\}/g, '');
-
-    if (!cleanMathOnly.includes('x') && !cleanMathOnly.includes('y') && cleanMathOnly.length > 0) {
+    if (!cleanText.includes('x') && !cleanText.includes('y') && cleanText.length > 0) {
         try {
-            const parsedExpr = parseMathText(cleanMathOnly);
+            const parsedExpr = parseMathText(cleanText);
             const evalFunc = new Function('return ' + parsedExpr);
             const val = evalFunc();
             if (typeof val === 'number' && !isNaN(val)) {
@@ -118,8 +210,17 @@ function handleRowEvaluation(id, text) {
 }
 
 function parseMathText(expr) {
-    let parsed = expr.toLowerCase()
-        .replace(/\s+/g, '')
+    let clean = expr.toLowerCase().replace(/\s+/g, '');
+
+    // Handle compound mathematical inequalities seamlessly (e.g., -5<=x<2 or 0<y<=3)
+    const compoundRegex = /^([^<>=]+)(<=|>=|<|>)([^<>=]+)(<=|>=|<|>)([^<>=]+)$/;
+    const match = clean.match(compoundRegex);
+    if (match) {
+        return `(${parseMathText(match[1])} ${match[2]} ${parseMathText(match[3])}) && (${parseMathText(match[3])} ${match[4]} ${parseMathText(match[5])})`;
+    }
+
+    let parsed = clean
+        .replace(/([xXyY])(?=[xXyY\(a-zA-Z])/g, '$1*') // Auto multiply variables side-by-side (e.g. xy -> x*y)
         .replace(/(\d)([xXyY\(a-zA-Z])/g, '$1*$2')
         .replace(/([xXyY\)])(\d)/g, '$1*$2')
         .replace(/\^/g, '**')
@@ -140,6 +241,10 @@ function parseMathText(expr) {
 
 function textToLatex(text) {
     let latex = text.toLowerCase();
+
+    // Convert domain curly braces to LaTeX format first
+    latex = latex.replace(/\{/g, '\\left\\{').replace(/\}/g, '\\right\\}');
+
     function replaceWithBraces(str, funcName, prefix, suffix) {
         let res = str;
         let searchStr = funcName + '(';
@@ -171,21 +276,9 @@ function textToLatex(text) {
 
     latex = latex.replace(/>=/g, '\\ge ').replace(/<=/g, '\\le ');
     latex = latex.replace(/\*/g, '\\cdot ');
-    latex = latex.replace(/\{/g, '\\left\\{').replace(/\}/g, '\\right\\}');
 
     return latex;
 }
-
-function getRGB(hex) {
-    let rgb = [0, 0, 0];
-    let hexMatch = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    if (hexMatch) rgb = [parseInt(hexMatch[1], 16), parseInt(hexMatch[2], 16), parseInt(hexMatch[3], 16)];
-    return rgb;
-}
-
-// --- EXPORT TO ACTUAL DESMOS ---
-let actualDesmosCalc = null;
-let isDesmosScriptLoaded = false;
 
 function exportToDesmos() {
     const validEquations = equations
@@ -218,11 +311,16 @@ function exportToDesmos() {
 
 function initActualDesmos(eqs) {
     const elt = document.getElementById('actual-desmos-engine');
+    const isDarkModeActive = document.body.classList.contains('dark-mode');
+
     if (!actualDesmosCalc) {
         actualDesmosCalc = Desmos.GraphingCalculator(elt, { expressions: true, settingsMenu: true });
     } else {
         actualDesmosCalc.setBlank();
     }
+
+    actualDesmosCalc.setGraphSettings({ invertedColors: isDarkModeActive });
+
     eqs.forEach((eq, index) => {
         actualDesmosCalc.setExpression({ id: 'graph-' + index, latex: eq.latex, color: eq.color });
     });
@@ -230,199 +328,125 @@ function initActualDesmos(eqs) {
 
 function closeActualDesmos() { document.getElementById('desmos-wrapper').style.display = 'none'; }
 
-// --- OPTIMIZED COST-TO-SMARTNESS AI FALLBACK CHAIN ---
-async function generateAiShape() {
-    const prompt = promptInput.value.trim();
-    if (!prompt) return;
-
-    generateBtn.disabled = true;
-    generateBtn.innerText = "Thinking...";
-    statusText.innerText = "Analyzing visual geometry bounds...";
-    statusText.style.color = "#8e44ad";
-
-    // TARGETING HIGH COST-BENEFIT SWEET-SPOT MODELS
-    const modelsToTry = [
-        'gpt-4o-mini',
-        'gemini-1.5-flash',
-        'openai/gpt-4o-mini',
-        'google/gemini-1.5-flash'
-    ];
-
-    const systemInstruction = `You are a professional analytical visual graphics compiler that translates spatial illustration ideas into clean 2D coordinate geometry configurations.
-
-                CRITICAL PACKAGING RULE: You must return ONLY a raw, unquoted valid JSON array of objects. Do not wrap your response in markdown code blocks (\`\`\`json). No conversational text before or after.
-                Each object must contain exactly two properties: 'equation' (string) and 'color' (7-character hex code starting with #).
-
-                CRITICAL SPATIAL BLUEPRINT LAYERING RULES:
-                When a user requests an animal face (like a cat), human face, or organic stacked character shape, do NOT overlap random shapes blindly. Build it using a strict vector canvas layout stack:
-                1. Central Structural Head Anchor: First element must be a large encompassing perimeter (e.g. circle at origin (0,0) with radius 4 to 5).
-                2. Internal Face Parts: Offset interior geometry elements so they reside strictly WITHIN the head's container bounds.
-                   - Left Eye: Shifted to top-left quadrant inside circle. E.g. (x+1.5)^2 + (y-1)^2 <= 0.3
-                   - Right Eye: Shifted to top-right quadrant inside circle. E.g. (x-1.5)^2 + (y-1)^2 <= 0.3
-                   - Nose/Mouth: Centered lower inside the head boundary. E.g. centered near x=0, y=-1.
-                3. Connected Appendages (Ears/Whiskers): Calculate coordinates that anchor directly onto or clip into the outer skull perimeter.
-                   - Cat Ears: Placed above and outside the main circle perimeter (e.g., elevated y and spaced x offsets).
-
-                GEOMETRIC LOGIC SYNTAL:
-                - Shading Regions (Inequalities): Use standard operational comparisons (<, >, <=, >=).
-                - Vector Clipping: Add conditional restriction limits to the end using separate curly braces '{...}'.
-                - NEVER mix bounds inside a single bracket block (use "{x > 0}{x < 5}", NEVER "{0 < x < 5}").
-
-                Production Target Architecture Example:
-                - Prompt: "A cat face"
-                  Output: [
-                    {"equation": "x^2 + y^2 <= 16", "color": "#2c3e50"},
-                    {"equation": "(x+1.5)^2 + (y-1)^2 <= 0.2", "color": "#ffffff"},
-                    {"equation": "(x-1.5)^2 + (y-1)^2 <= 0.2", "color": "#ffffff"},
-                    {"equation": "y <= -1 {y >= -1.5} {x >= -1} {x <= 1}", "color": "#e74c3c"},
-                    {"equation": "(x+2.5)^2 + (y-3.5)^2 <= 1.5", "color": "#2c3e50"},
-                    {"equation": "(x-2.5)^2 + (y-3.5)^2 <= 1.5", "color": "#2c3e50"}
-                  ]`;
-
-    let response = null;
-    let currentModelName = "Auto-Router Node";
-
-    for (let i = 0; i < modelsToTry.length; i++) {
-        try {
-            statusText.innerText = `Compiling on optimized node [${modelsToTry[i]}]...`;
-            response = await puter.ai.chat([
-                { role: "system", content: systemInstruction },
-                { role: "user", content: prompt }
-            ], { model: modelsToTry[i] });
-
-            if (response) {
-                currentModelName = modelsToTry[i];
-                break;
-            }
-        } catch (err) {
-            console.warn(`Model variant unavailable: ${modelsToTry[i]}. Transitioning fallback path...`);
-        }
-    }
-
-    if (!response) {
-        try {
-            statusText.innerText = "Routing request through baseline fallback node...";
-            response = await puter.ai.chat([
-                { role: "system", content: systemInstruction },
-                { role: "user", content: prompt }
-            ]);
-        } catch (finalErr) {
-            throw new Error("All cloud computation pathways are currently saturated. Try again in a moment.");
-        }
-    }
-
-    try {
-        let aiText = '';
-        if (typeof response === 'string') {
-            aiText = response;
-        } else if (response && response.message && response.message.content) {
-            aiText = response.message.content;
-        } else if (response && response.text) {
-            aiText = response.text;
-        } else {
-            aiText = JSON.stringify(response);
-        }
-
-        const arrayMatch = aiText.match(/\[\s*\{[\s\S]*\}\s*\]/);
-        if (arrayMatch) {
-            aiText = arrayMatch[0];
-        } else {
-            aiText = aiText.replace(/```json/g, '').replace(/```/g, '').trim();
-        }
-
-        const newEquations = JSON.parse(aiText);
-
-        eqList.innerHTML = '';
-        equations = [];
-        newEquations.forEach(item => addEquation(item.equation, item.color));
-
-        scale = 50; offsetX = canvas.width / 2; offsetY = canvas.height / 2;
-        draw();
-
-        statusText.innerText = `Success! Rendered efficiently via ${currentModelName}.`;
-        statusText.style.color = "#27ae60";
-
-        if (window.innerWidth <= 768 && sidebar.classList.contains('open')) toggleSidebar();
-
-    } catch (error) {
-        console.error(error);
-        statusText.innerText = `Compilation Error: Data syntax malformed. Try rephrasing your prompt.`;
-        statusText.style.color = "#e74c3c";
-    } finally {
-        generateBtn.disabled = false; generateBtn.innerText = "Generate";
-    }
-}
-
-// --- GENERAL MATRIX RENDERING ENGINE ---
+// --- RENDER LOOP WITH DYNAMIC AXES ---
 function draw() {
+    if (!canvas.width || !canvas.height) return;
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw Grid Lines
-    ctx.lineWidth = 1; ctx.strokeStyle = '#e0e0e0'; ctx.beginPath();
-    let startX = (offsetX % scale) - scale;
-    for (let x = startX; x < canvas.width; x += scale) { ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); }
-    let startY = (offsetY % scale) - scale;
-    for (let y = startY; y < canvas.height; y += scale) { ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); }
+    const isDarkMode = document.body.classList.contains('dark-mode');
+
+    const minPixelsBetweenLines = 70;
+    const rawMathStep = minPixelsBetweenLines / scale;
+
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rawMathStep)));
+    const residual = rawMathStep / magnitude;
+    let stepMultiplier = 1;
+    if (residual > 5) stepMultiplier = 10;
+    else if (residual > 2) stepMultiplier = 5;
+    else if (residual > 1) stepMultiplier = 2;
+
+    const mathStep = stepMultiplier * magnitude;
+    const pixelStep = mathStep * scale;
+
+    ctx.font = '12px "Courier New", Courier, monospace';
+    ctx.fillStyle = isDarkMode ? '#95a5a6' : '#7f8c8d';
+
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = isDarkMode ? '#2c2c2c' : '#e0e0e0';
+    ctx.beginPath();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+
+    let firstMathX = Math.floor((-offsetX) / pixelStep) * mathStep;
+    for (let mathX = firstMathX; (offsetX + mathX * scale) < canvas.width; mathX += mathStep) {
+        let px = offsetX + mathX * scale;
+        ctx.moveTo(px, 0); ctx.lineTo(px, canvas.height);
+
+        if (Math.abs(mathX) > 1e-10) {
+            let textY = Math.max(5, Math.min(canvas.height - 20, offsetY + 5));
+            let label = parseFloat(mathX.toPrecision(12)).toString();
+            ctx.fillText(label, px, textY);
+        }
+    }
     ctx.stroke();
 
-    // Draw Core Axes
-    ctx.lineWidth = 2; ctx.strokeStyle = '#000000'; ctx.beginPath();
+    ctx.beginPath();
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+
+    let firstMathY = Math.floor((offsetY - canvas.height) / pixelStep) * mathStep;
+    for (let mathY = firstMathY; (offsetY - mathY * scale) > 0; mathY += mathStep) {
+        let py = offsetY - mathY * scale;
+        ctx.moveTo(0, py); ctx.lineTo(canvas.width, py);
+
+        if (Math.abs(mathY) > 1e-10) {
+            let textX = Math.max(25, Math.min(canvas.width - 5, offsetX - 5));
+            let label = parseFloat(mathY.toPrecision(12)).toString();
+            ctx.fillText(label, textX, py);
+        }
+    }
+    ctx.stroke();
+
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = isDarkMode ? '#e0e0e0' : '#2c3e50';
+    ctx.beginPath();
     if (offsetY >= 0 && offsetY <= canvas.height) { ctx.moveTo(0, offsetY); ctx.lineTo(canvas.width, offsetY); }
     if (offsetX >= 0 && offsetX <= canvas.width) { ctx.moveTo(offsetX, 0); ctx.lineTo(offsetX, canvas.height); }
     ctx.stroke();
 
+    ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+    let originX = Math.max(15, Math.min(canvas.width - 5, offsetX - 5));
+    let originY = Math.max(5, Math.min(canvas.height - 15, offsetY + 5));
+    ctx.fillText("0", originX, originY);
+
     equations.forEach(eq => {
         if (eq.type !== 'graph') return;
-
         let rawExpr = eq.element.value.trim().replace(/\s+/g, '').toLowerCase();
         if (!rawExpr) return;
 
-        let coreExpr = rawExpr;
-        let boundaryStrings = [];
-        coreExpr = coreExpr.replace(/\{([^}]+)\}/g, (match, condition) => {
-            boundaryStrings.push(condition);
+        // Extract Desmos-style {} boundaries
+        let conditions = [];
+        let baseExpr = rawExpr.replace(/\{([^}]+)\}/g, function(match, p1) {
+            conditions.push(p1);
             return '';
         });
 
-        let parsedBoundaries = boundaryStrings.map(b => {
-            let pb = parseMathText(b);
-            return pb.replace(/(?<![<>])=(?!=)/g, '===');
-        });
-
-        let checkBoundaries;
-        try {
-            let jointCondition = parsedBoundaries.length > 0 ? parsedBoundaries.join(')&&(') : 'true';
-            checkBoundaries = new Function('x', 'y', 'return (' + jointCondition + ')');
-            checkBoundaries(0, 0);
-        } catch (e) { return; }
-
-        let operatorMatch = coreExpr.match(/(>=|<=|>|<|=)/);
+        let operatorMatch = baseExpr.match(/(>=|<=|>|<|=)/);
         let operator, lhs, rhs;
 
         if (operatorMatch) {
             operator = operatorMatch[0];
-            let parts = coreExpr.split(operator);
+            let parts = baseExpr.split(operator);
             lhs = parts[0].trim();
             rhs = parts[1].trim();
         } else {
-            operator = '='; lhs = 'y'; rhs = coreExpr;
+            operator = '='; lhs = 'y'; rhs = baseExpr;
         }
 
         let isInequality = operator !== '=';
-        let isExplicitY = (lhs === 'y' && !rhs.includes('y'));
-        let isExplicitX = (lhs === 'x' && !rhs.includes('x'));
-        let isImplicit = !isExplicitY && !isExplicitX;
+        let isExplicitY = lhs === 'y';
+        let isExplicitX = lhs === 'x';
+        let isImplicitEquality = operator === '=' && !isExplicitY && !isExplicitX;
 
-        // CASE A: INEQUALITY REGION SHADING
-        if (isInequality) {
-            let parsedExpr = parseMathText(coreExpr);
-            let fShader;
+        if (isInequality || isImplicitEquality) {
+            let compiledConditions = [];
+            let fShader, fLHS, fRHS;
             try {
-                fShader = new Function('x', 'y', 'return ' + parsedExpr);
-                fShader(0, 0);
+                if (isInequality) {
+                    let parsedExpr = parseMathText(baseExpr);
+                    fShader = new Function('x', 'y', 'return ' + parsedExpr);
+                    fShader(0, 0);
+                } else {
+                    fLHS = new Function('x', 'y', 'return ' + parseMathText(lhs));
+                    fRHS = new Function('x', 'y', 'return ' + parseMathText(rhs));
+                    fLHS(0, 0); fRHS(0, 0);
+                }
+                for (let c of conditions) {
+                    compiledConditions.push(new Function('x', 'y', 'return ' + parseMathText(c)));
+                }
             } catch (e) { return; }
 
-            let res = 0.5;
+            // Use high sampling density for complex explicit/implicit lines
+            let res = isImplicitEquality ? 1.0 : 0.5;
             let offW = Math.ceil(canvas.width * res);
             let offH = Math.ceil(canvas.height * res);
 
@@ -432,19 +456,40 @@ function draw() {
             let imgData = offCtx.createImageData(offW, offH);
             let data = imgData.data;
 
-            let rgb = getRGB(eq.color);
-            let index = 0;
+            let rgb = [0,0,0];
+            let hexMatch = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(eq.color);
+            if (hexMatch) rgb = [parseInt(hexMatch[1], 16), parseInt(hexMatch[2], 16), parseInt(hexMatch[3], 16)];
 
+            let index = 0;
             for (let py = 0; py < offH; py++) {
                 let mathY = (offsetY - (py / res)) / scale;
+                let mathYNext = (offsetY - ((py + 1) / res)) / scale;
                 for (let px = 0; px < offW; px++) {
                     let mathX = ((px / res) - offsetX) / scale;
+                    let mathXNext = (((px + 1) / res) - offsetX) / scale;
                     try {
-                        if (checkBoundaries(mathX, mathY) && fShader(mathX, mathY)) {
-                            data[index] = rgb[0];
-                            data[index+1] = rgb[1];
-                            data[index+2] = rgb[2];
-                            data[index+3] = 60;
+                        let isValid = true;
+                        for (let cond of compiledConditions) {
+                            if (!cond(mathX, mathY)) { isValid = false; break; }
+                        }
+
+                        if (isValid) {
+                            if (isInequality) {
+                                if (fShader(mathX, mathY)) {
+                                    data[index] = rgb[0]; data[index+1] = rgb[1]; data[index+2] = rgb[2]; data[index+3] = 60;
+                                }
+                            } else {
+                                // Grid crossing sign change check for general equations
+                                let v = fLHS(mathX, mathY) - fRHS(mathX, mathY);
+                                let vX = fLHS(mathXNext, mathY) - fRHS(mathXNext, mathY);
+                                let vY = fLHS(mathX, mathYNext) - fRHS(mathX, mathYNext);
+
+                                if ((v * vX <= 0 && Math.abs(v - vX) < 10) ||
+                                    (v * vY <= 0 && Math.abs(v - vY) < 10) ||
+                                    Math.abs(v) < 0.005) {
+                                    data[index] = rgb[0]; data[index+1] = rgb[1]; data[index+2] = rgb[2]; data[index+3] = 255;
+                                }
+                            }
                         }
                     } catch(e) {}
                     index += 4;
@@ -454,78 +499,26 @@ function draw() {
             ctx.drawImage(offCanvas, 0, 0, offW, offH, 0, 0, canvas.width, canvas.height);
         }
 
-        // CASE B: IMPLICIT EQUATION & BOUNDARIES
-        if (isImplicit) {
-            let fValue;
-            try {
-                fValue = new Function('x', 'y', 'return (' + parseMathText(lhs) + ') - (' + parseMathText(rhs) + ')');
-                fValue(0,0);
-            } catch(e) { return; }
-
-            let res = 1.0;
-            let offW = Math.ceil(canvas.width * res);
-            let offH = Math.ceil(canvas.height * res);
-
-            let offCanvas = document.createElement('canvas');
-            offCanvas.width = offW; offCanvas.height = offH;
-            let offCtx = offCanvas.getContext('2d');
-            let imgData = offCtx.createImageData(offW, offH);
-            let data = imgData.data;
-
-            let rgb = getRGB(eq.color);
-
-            let grid = [];
-            for (let py = 0; py < offH; py++) {
-                grid[py] = new Float32Array(offW);
-                let mathY = (offsetY - (py / res)) / scale;
-                for (let px = 0; px < offW; px++) {
-                    let mathX = ((px / res) - offsetX) / scale;
-                    if (checkBoundaries(mathX, mathY)) {
-                        grid[py][px] = fValue(mathX, mathY);
-                    } else {
-                        grid[py][px] = NaN;
-                    }
-                }
-            }
-
-            for (let py = 0; py < offH - 1; py++) {
-                for (let px = 0; px < offW - 1; px++) {
-                    let v = grid[py][px];
-                    if (isNaN(v)) continue;
-                    let r = grid[py][px+1];
-                    let b = grid[py+1][px];
-
-                    let isZeroCrossing = false;
-                    if (!isNaN(r) && v * r <= 0) isZeroCrossing = true;
-                    if (!isNaN(b) && v * b <= 0) isZeroCrossing = true;
-
-                    if (isZeroCrossing) {
-                        let index = (py * offW + px) * 4;
-                        data[index] = rgb[0];
-                        data[index+1] = rgb[1];
-                        data[index+2] = rgb[2];
-                        data[index+3] = 255;
-                    }
-                }
-            }
-            offCtx.putImageData(imgData, 0, 0);
-            ctx.drawImage(offCanvas, 0, 0, offW, offH, 0, 0, canvas.width, canvas.height);
-        }
-
-        // CASE C: EXPLICIT LOGIC LINE VECTORS
-        if (!isImplicit) {
+        if (isExplicitY || isExplicitX) {
             let parsedBoundary = parseMathText(rhs);
             let fLine;
+            let compiledConditions = [];
             let independentVar = isExplicitY ? 'x' : 'y';
+
             try {
                 fLine = new Function(independentVar, 'return ' + parsedBoundary);
                 fLine(0);
+                for (let c of conditions) {
+                    compiledConditions.push(new Function('x', 'y', 'return ' + parseMathText(c)));
+                }
             } catch (e) { return; }
 
             ctx.beginPath();
             ctx.strokeStyle = eq.color;
             ctx.lineWidth = 2.5;
-            ctx.setLineDash([]);
+
+            if (operator === '<' || operator === '>') ctx.setLineDash([5, 5]);
+            else ctx.setLineDash([]);
 
             let firstPoint = true;
 
@@ -533,11 +526,17 @@ function draw() {
                 for (let px = 0; px <= canvas.width; px++) {
                     let mathX = (px - offsetX) / scale;
                     try {
-                        let mathY = fLine(mathX); let py = offsetY - (mathY * scale);
+                        let mathY = fLine(mathX);
 
-                        if (isFinite(py) && checkBoundaries(mathX, mathY)) {
-                            if (firstPoint) { ctx.moveTo(px, py); firstPoint = false; }
-                            else { ctx.lineTo(px, py); }
+                        let isValid = true;
+                        for (let cond of compiledConditions) {
+                            if (!cond(mathX, mathY)) { isValid = false; break; }
+                        }
+                        if (!isValid) { firstPoint = true; continue; }
+
+                        let py = offsetY - (mathY * scale);
+                        if (isFinite(py)) {
+                            if (firstPoint) { ctx.moveTo(px, py); firstPoint = false; } else { ctx.lineTo(px, py); }
                         } else { firstPoint = true; }
                     } catch (e) { firstPoint = true; }
                 }
@@ -545,44 +544,104 @@ function draw() {
                 for (let py = 0; py <= canvas.height; py++) {
                     let mathY = (offsetY - py) / scale;
                     try {
-                        let mathX = fLine(mathY); let px = offsetX + (mathX * scale);
+                        let mathX = fLine(mathY);
 
-                        if (isFinite(px) && checkBoundaries(mathX, mathY)) {
-                            if (firstPoint) { ctx.moveTo(px, py); firstPoint = false; }
-                            else { ctx.lineTo(px, py); }
+                        let isValid = true;
+                        for (let cond of compiledConditions) {
+                            if (!cond(mathX, mathY)) { isValid = false; break; }
+                        }
+                        if (!isValid) { firstPoint = true; continue; }
+
+                        let px = offsetX + (mathX * scale);
+                        if (isFinite(px)) {
+                            if (firstPoint) { ctx.moveTo(px, py); firstPoint = false; } else { ctx.lineTo(px, py); }
                         } else { firstPoint = true; }
                     } catch (e) { firstPoint = true; }
                 }
             }
             ctx.stroke();
+            ctx.setLineDash([]);
         }
     });
 }
 
-// --- INTERACTIVITY LOGIC ---
-let isDragging = false; let lastMouseX, lastMouseY;
+// --- SAFER MOBILE TOUCH EVENTS ---
+let isDragging = false;
+let lastMouseX, lastMouseY;
+let lastPinchDist = null;
+
+function getPinchDistance(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
 canvas.addEventListener('mousedown', (e) => { isDragging = true; lastMouseX = e.clientX; lastMouseY = e.clientY; });
+
 canvas.addEventListener('touchstart', (e) => {
-    if (e.touches.length === 1) { isDragging = true; lastMouseX = e.touches[0].clientX; lastMouseY = e.touches[0].clientY; }
+    if (e.cancelable) e.preventDefault();
+
+    if (e.touches.length === 1) {
+        isDragging = true; lastMouseX = e.touches[0].clientX; lastMouseY = e.touches[0].clientY;
+    } else if (e.touches.length === 2) {
+        lastPinchDist = getPinchDistance(e.touches);
+    }
 });
+
 window.addEventListener('mouseup', () => { isDragging = false; });
-window.addEventListener('touchend', () => { isDragging = false; });
+window.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) lastPinchDist = null;
+    if (e.touches.length === 0) isDragging = false;
+});
+
 window.addEventListener('mousemove', (e) => {
     if (!isDragging) return;
     offsetX += e.clientX - lastMouseX; offsetY += e.clientY - lastMouseY;
     lastMouseX = e.clientX; lastMouseY = e.clientY; draw();
 });
+
 canvas.addEventListener('touchmove', (e) => {
-    if (!isDragging || e.touches.length !== 1) return;
-    offsetX += e.touches[0].clientX - lastMouseX; offsetY += e.touches[0].clientY - lastMouseY;
-    lastMouseX = e.touches[0].clientX; lastMouseY = e.touches[0].clientY; draw();
+    if (e.cancelable) e.preventDefault();
+
+    if (e.touches.length === 1 && isDragging) {
+        offsetX += e.touches[0].clientX - lastMouseX; offsetY += e.touches[0].clientY - lastMouseY;
+        lastMouseX = e.touches[0].clientX; lastMouseY = e.touches[0].clientY; draw();
+    } else if (e.touches.length === 2 && lastPinchDist) {
+        const newPinchDist = getPinchDistance(e.touches);
+        const zoomFactor = newPinchDist / lastPinchDist;
+        scale *= zoomFactor;
+
+        const pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+
+        const canvasRect = canvas.getBoundingClientRect();
+        const mouseX = pinchX - canvasRect.left;
+        const mouseY = pinchY - canvasRect.top;
+
+        offsetX = mouseX - (mouseX - offsetX) * zoomFactor;
+        offsetY = mouseY - (mouseY - offsetY) * zoomFactor;
+
+        lastPinchDist = newPinchDist;
+        draw();
+    }
 });
+
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault(); const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9; scale *= zoomFactor;
     const mouseX = e.clientX - canvas.getBoundingClientRect().left; const mouseY = e.clientY - canvas.getBoundingClientRect().top;
     offsetX = mouseX - (mouseX - offsetX) * zoomFactor; offsetY = mouseY - (mouseY - offsetY) * zoomFactor; draw();
 });
 
-resizeCanvas();
-addEquation('x^2 + y^2 < 10', '#2d70b3');
-addEquation('y = x^2 {x < 2}', '#c74440');
+window.onload = () => {
+    resizeCanvas();
+    addEquation('x^2 + y^2 <= 25', '#3498db', 'Base circle outline');
+    addEquation('y > x^2 - 4', '#e74c3c', 'Lower boundary curve');
+
+    const userIdeaBox = document.getElementById('user-idea');
+    userIdeaBox.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            openGeminiWithPrompt();
+        }
+    });
+};
